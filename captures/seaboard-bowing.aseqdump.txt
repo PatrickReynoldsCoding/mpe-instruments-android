@@ -1,0 +1,278 @@
+Waiting for data. Press Ctrl+C to end.
+Source  Event                  Ch  Data
+ 28:0   Pitch bend              2, value -10
+ 28:0   Control change          2, controller 74, value 28
+ 28:0   Channel aftertouch      2, value 5
+ 28:0   Pitch bend              1, value 13
+ 28:0   Channel aftertouch      1, value 59
+ 28:0   Pitch bend              4, value 10
+ 28:0   Pitch bend              2, value -5
+ 28:0   Channel aftertouch      2, value 0
+ 28:0   Pitch bend              1, value 18
+ 28:0   Control change          4, controller 74, value 33
+ 28:0   Channel aftertouch      1, value 50
+ 28:0   Pitch bend              4, value 5
+ 28:0   Pitch bend              2, value -3
+ 28:0   Pitch bend              1, value 21
+ 28:0   Pitch bend              4, value 14
+ 28:0   Channel aftertouch      1, value 39
+ 28:0   Pitch bend              2, value -2
+ 28:0   Control change          1, controller 74, value 28
+ 28:0   Pitch bend              1, value 5
+ 28:0   Channel aftertouch      1, value 30
+ 28:0   Pitch bend              1, value -1
+ 28:0   Control change          1, controller 74, value 26
+ 28:0   Channel aftertouch      2, value 2
+ 28:0   Channel aftertouch      1, value 21
+ 28:0   Pitch bend              1, value 0
+ 28:0   Control change          1, controller 74, value 25
+ 28:0   Channel aftertouch      2, value 6
+ 28:0   Channel aftertouch      1, value 13
+ 28:0   Pitch bend              2, value -1
+ 28:0   Channel aftertouch      2, value 11
+ 28:0   Note off                1, note 36, velocity 55
+ 28:0   Note off                4, note 50, velocity 0
+ 28:0   Channel aftertouch      2, value 16
+ 28:0   Pitch bend              2, value 0
+ 28:0   Channel aftertouch      2, value 20
+ 28:0   Channel aftertouch      2, value 23
+ 28:0   Channel aftertouch      2, value 25
+ 28:0   Channel aftertouch      2, value 26
+ 28:0   Channel aftertouch      2, value 27
+ 28:0   Channel aftertouch      2, value 28
+ 28:0   Control change          4, controller 74, value 25
+ 28:0   Pitch bend              4, value 0
+ 28:0   Note on                 4, note 50, velocity 5
+ 28:0   Pitch bend              4, value 25
+ 28:0   Channel aftertouch      2, value 27
+ 28:0   Channel aftertouch      4, value 2
+ 28:0   Pitch bend              4, value 16
+ 28:0   Channel aftertouch      2, value 25
+ 28:0   Control change          4, controller 74, value 27
+ 28:0   Channel aftertouch      4, value 0
+ 28:0   Pitch bend              4, value 12
+ 28:0   Channel aftertouch      2, value 23
+ 28:0   Pitch bend              4, value 10
+ 28:0   Control change          2, controller 74, value 27
+ 28:0   Channel aftertouch      2, value 19
+ 28:0   Pitch bend              4, value 9
+ 28:0   Pitch bend              2, value 1
+ 28:0   Channel aftertouch      2, value 15
+ 28:0   Control change          4, controller 74, value 26
+ 28:0   Pitch bend              2, value 2
+ 28:0   Control change          2, controller 74, value 26
+ 28:0   Channel aftertouch      2, value 9
+ 28:0   Channel aftertouch      4, value 5
+ 28:0   Pitch bend              4, value 8
+ 28:0   Pitch bend              2, value 4
+ 28:0   Channel aftertouch      2, value 4
+ 28:0   Pitch bend              4, value 6
+ 28:0   Channel aftertouch      4, value 10
+ 28:0   Pitch bend              2, value 8
+ 28:0   Control change          2, controller 74, value 27
+ 28:0   Pitch bend              4, value 5
+ 28:0   Channel aftertouch      2, value 0
+ 28:0   Channel aftertouch      4, value 15
+ 28:0   Pitch bend              2, value 0
+ 28:0   Pitch bend              4, value 4
+ 28:0   Control change          2, controller 74, value 33
+ 28:0   Channel aftertouch      4, value 19
+ 28:0   Note off                2, note 52, velocity 36
+ 28:0   Channel aftertouch      4, value 23
+ 28:0   Channel aftertouch      4, value 27
+ 28:0   Pitch bend              4, value 2
+ 28:0   Channel aftertouch      4, value 30
+ 28:0   Channel aftertouch      4, value 33
+ 28:0   Channel aftertouch      4, value 35
+ 28:0   Channel aftertouch      4, value 37
+ 28:0   Channel aftertouch      4, value 38
+ 28:0   Pitch bend              4, value 1
+ 28:0   Control change          4, controller 74, value 27
+ 28:0   Pitch bend              4, value 2
+ 28:0   Channel aftertouch      4, value 37
+ 28:0   Channel aftertouch      4, value 36
+ 28:0   Pitch bend              4, value 5
+ 28:0   Channel aftertouch      4, value 34
+ 28:0   Pitch bend              4, value 4
+ 28:0   Channel aftertouch      4, value 32
+ 28:0   Pitch bend              4, value 5
+ 28:0   Channel aftertouch      4, value 30
+ 28:0   Pitch bend              4, value 8
+ 28:0   Channel aftertouch      4, value 26
+ 28:0   Control change          4, controller 74, value 28
+ 28:0   Pitch bend              4, value 6
+ 28:0   Channel aftertouch      4, value 22
+ 28:0   Control change          4, controller 74, value 27
+ 28:0   Pitch bend              4, value 18
+ 28:0   Control change          2, controller 74, value 33
+ 28:0   Pitch bend              2, value 0
+ 28:0   Note on                 2, note 52, velocity 3
+ 28:0   Channel aftertouch      4, value 17
+ 28:0   Control change          4, controller 74, value 25
+ 28:0   Control change          2, controller 74, value 31
+ 28:0   Pitch bend              4, value 0
+ 28:0   Channel aftertouch      2, value 0
+ 28:0   Channel aftertouch      4, value 11
+ 28:0   Control change          1, controller 74, value 33
+ 28:0   Pitch bend              1, value 0
+ 28:0   Note on                 1, note 36, velocity 3
+ 28:0   Control change          2, controller 74, value 30
+ 28:0   Channel aftertouch      4, value 4
+ 28:0   Channel aftertouch      1, value 0
+ 28:0   Note off                4, note 50, velocity 84
+ 28:0   Control change          2, controller 74, value 29
+ 28:0   Pitch bend              2, value 1
+ 28:0   Control change          1, controller 74, value 31
+ 28:0   Control change          1, controller 74, value 32
+ 28:0   Pitch bend              2, value 0
+ 28:0   Pitch bend              1, value -3
+ 28:0   Pitch bend              1, value -7
+ 28:0   Pitch bend              1, value -10
+ 28:0   Channel aftertouch      1, value 3
+ 28:0   Channel aftertouch      1, value 15
+ 28:0   Channel aftertouch      2, value 1
+ 28:0   Pitch bend              1, value -11
+ 28:0   Channel aftertouch      1, value 26
+ 28:0   Channel aftertouch      2, value 3
+ 28:0   Control change          1, controller 74, value 31
+ 28:0   Channel aftertouch      1, value 38
+ 28:0   Channel aftertouch      2, value 5
+ 28:0   Channel aftertouch      1, value 50
+ 28:0   Pitch bend              1, value -10
+ 28:0   Channel aftertouch      2, value 6
+ 28:0   Channel aftertouch      1, value 61
+ 28:0   Channel aftertouch      2, value 7
+ 28:0   Channel aftertouch      1, value 73
+ 28:0   Pitch bend              1, value -9
+ 28:0   Channel aftertouch      1, value 83
+ 28:0   Channel aftertouch      2, value 6
+ 28:0   Pitch bend              1, value -7
+ 28:0   Pitch bend              2, value 1
+ 28:0   Channel aftertouch      1, value 91
+ 28:0   Channel aftertouch      2, value 5
+ 28:0   Control change          2, controller 74, value 30
+ 28:0   Channel aftertouch      1, value 95
+ 28:0   Channel aftertouch      2, value 3
+ 28:0   Pitch bend              1, value -6
+ 28:0   Pitch bend              2, value 2
+ 28:0   Pitch bend              1, value -3
+ 28:0   Channel aftertouch      2, value 1
+ 28:0   Channel aftertouch      1, value 90
+ 28:0   Pitch bend              1, value 0
+ 28:0   Pitch bend              2, value 1
+ 28:0   Channel aftertouch      2, value 0
+ 28:0   Control change          2, controller 74, value 31
+ 28:0   Channel aftertouch      1, value 80
+ 28:0   Pitch bend              1, value 10
+ 28:0   Pitch bend              2, value 0
+ 28:0   Channel aftertouch      1, value 66
+ 28:0   Control change          4, controller 74, value 33
+ 28:0   Pitch bend              4, value 0
+ 28:0   Note on                 4, note 50, velocity 3
+ 28:0   Control change          2, controller 74, value 33
+ 28:0   Pitch bend              2, value 1
+ 28:0   Control change          1, controller 74, value 29
+ 28:0   Pitch bend              1, value 8
+ 28:0   Control change          4, controller 74, value 32
+ 28:0   Channel aftertouch      1, value 53
+ 28:0   Channel aftertouch      4, value 0
+ 28:0   Pitch bend              2, value 0
+ 28:0   Control change          1, controller 74, value 28
+ 28:0   Pitch bend              1, value 13
+ 28:0   Channel aftertouch      1, value 40
+ 28:0   Control change          4, controller 74, value 30
+ 28:0   Pitch bend              2, value -23
+ 28:0   Control change          1, controller 74, value 33
+ 28:0   Pitch bend              1, value 4
+ 28:0   Pitch bend              2, value 0
+ 28:0   Channel aftertouch      1, value 30
+ 28:0   Control change          4, controller 74, value 29
+ 28:0   Pitch bend              1, value -3
+ 28:0   Note off                2, note 52, velocity 15
+ 28:0   Channel aftertouch      1, value 20
+ 28:0   Pitch bend              4, value 5
+ 28:0   Channel aftertouch      1, value 12
+ 28:0   Pitch bend              4, value 4
+ 28:0   Note off                1, note 36, velocity 25
+ 28:0   Pitch bend              4, value 2
+ 28:0   Channel aftertouch      4, value 1
+ 28:0   Channel aftertouch      4, value 7
+ 28:0   Channel aftertouch      4, value 11
+ 28:0   Pitch bend              4, value 4
+ 28:0   Channel aftertouch      4, value 14
+ 28:0   Channel aftertouch      4, value 16
+ 28:0   Channel aftertouch      4, value 17
+ 28:0   Pitch bend              4, value 5
+ 28:0   Pitch bend              4, value 8
+ 28:0   Channel aftertouch      4, value 15
+ 28:0   Pitch bend              4, value 12
+ 28:0   Channel aftertouch      4, value 12
+ 28:0   Pitch bend              4, value 4
+ 28:0   Control change          4, controller 74, value 30
+ 28:0   Pitch bend              4, value 5
+ 28:0   Channel aftertouch      4, value 8
+ 28:0   Pitch bend              4, value 6
+ 28:0   Channel aftertouch      4, value 4
+ 28:0   Pitch bend              4, value 4
+ 28:0   Channel aftertouch      4, value 0
+ 28:0   Pitch bend              4, value 0
+ 28:0   Control change          4, controller 74, value 31
+ 28:0   Pitch bend              4, value 5
+ 28:0   Pitch bend              4, value 10
+ 28:0   Control change          4, controller 74, value 30
+ 28:0   Pitch bend              4, value 8
+ 28:0   Pitch bend              4, value 6
+ 28:0   Pitch bend              4, value 0
+ 28:0   Control change          4, controller 74, value 31
+ 28:0   Pitch bend              4, value -2
+ 28:0   Pitch bend              4, value -22
+ 28:0   Pitch bend              4, value 0
+ 28:0   Control change          4, controller 74, value 33
+ 28:0   Note off                4, note 50, velocity 19
+ 28:0   Control change          2, controller 74, value 33
+ 28:0   Pitch bend              2, value 0
+ 28:0   Note on                 2, note 52, velocity 3
+ 28:0   Pitch bend              2, value 10
+ 28:0   Channel aftertouch      2, value 2
+ 28:0   Pitch bend              2, value 9
+ 28:0   Channel aftertouch      2, value 0
+ 28:0   Pitch bend              2, value 12
+ 28:0   Pitch bend              2, value 10
+ 28:0   Pitch bend              2, value 0
+ 28:0   Note off                2, note 52, velocity 0
+ 28:0   Control change          4, controller 74, value 33
+ 28:0   Pitch bend              4, value 0
+ 28:0   Note on                 4, note 50, velocity 3
+ 28:0   Control change          1, controller 74, value 25
+ 28:0   Pitch bend              1, value 0
+ 28:0   Note on                 1, note 36, velocity 3
+ 28:0   Pitch bend              4, value 0
+ 28:0   Channel aftertouch      4, value 0
+ 28:0   Control change          1, controller 74, value 27
+ 28:0   Channel aftertouch      1, value 0
+ 28:0   Control change          1, controller 74, value 28
+ 28:0   Control change          1, controller 74, value 29
+ 28:0   Pitch bend              1, value 16
+ 28:0   Pitch bend              1, value 17
+ 28:0   Note off                4, note 50, velocity 0
+ 28:0   Pitch bend              1, value 18
+ 28:0   Control change          1, controller 74, value 31
+ 28:0   Pitch bend              1, value 22
+ 28:0   Pitch bend              1, value 20
+ 28:0   Pitch bend              1, value 18
+ 28:0   Control change          1, controller 74, value 32
+ 28:0   Pitch bend              1, value 24
+ 28:0   Control change          1, controller 74, value 33
+ 28:0   Pitch bend              1, value 22
+ 28:0   Pitch bend              1, value 24
+ 28:0   Pitch bend              1, value 25
+ 28:0   Pitch bend              1, value 24
+ 28:0   Pitch bend              1, value 22
+ 28:0   Pitch bend              1, value 24
+ 28:0   Pitch bend              1, value 21
+ 28:0   Pitch bend              1, value 25
+ 28:0   Pitch bend              1, value 20
+ 28:0   Pitch bend              1, value 4
+ 28:0   Pitch bend              1, value 5
+ 28:0   Pitch bend              1, value 0
+ 28:0   Note off                1, note 36, velocity 17

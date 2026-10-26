@@ -3,4 +3,4 @@ build/
 local.properties
 *.iml
 .idea/
-captures/
+/app/captures/
