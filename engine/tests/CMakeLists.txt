@@ -1,0 +1,7 @@
+foreach(t test_clean test_engine test_replay)
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${t}.cpp)
+    add_executable(${t} ${t}.cpp)
+    target_link_libraries(${t} mpe_engine)
+    add_test(NAME ${t} COMMAND ${t} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
+endforeach()
