@@ -40,3 +40,12 @@ FN(jdoubleArray, nativeStats)(JNIEnv* env, jobject) {
     env->SetDoubleArrayRegion(arr, 0, Synth::kStatCount, v);
     return arr;
 }
+
+FN(jboolean, nativeCaptureStart)(JNIEnv*, jobject, jfloat seconds) { return synth().captureStart(seconds); }
+FN(jdouble, nativeCaptureProgress)(JNIEnv*, jobject) { return synth().captureProgress(); }
+FN(jboolean, nativeCaptureSave)(JNIEnv* env, jobject, jstring path) {
+    const char* p = env->GetStringUTFChars(path, nullptr);
+    bool ok = synth().captureSave(p);
+    env->ReleaseStringUTFChars(path, p);
+    return ok;
+}

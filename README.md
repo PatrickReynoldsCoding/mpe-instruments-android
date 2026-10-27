@@ -9,10 +9,10 @@ the MIDI stream clean, so a lost link never leaves a stuck note (the logic from
 Seaboard -> android.media.midi -> core (clean) -> voice engine (Faust) -> Oboe -> speaker
 ```
 
-Status: the engine (`engine/`) is built and tested on the desktop. The Android app
-(`app/`) is written but has **never been compiled or run**: it was written on a machine without
-the Android SDK. Expect a first build to need small fixes. See [LATENCY.md](LATENCY.md) for the
-low-latency design and what still has to be measured on a real phone.
+Status: the engine is tested on the desktop, and the app builds and passes end-to-end tests on
+an Android emulator with an emulated Seaboard. It has **not yet run on a real phone or with the
+real controller**. See [LATENCY.md](LATENCY.md) for the low-latency design and what still has
+to be measured on a phone.
 
 ## Build and test
 
@@ -26,8 +26,21 @@ Engine, on the desktop (needs `cmake`, a C++17 compiler, and `faust`):
 Android app (needs Android Studio or the command-line SDK with NDK, JDK 17, and `faust` on the
 machine running Gradle, because the build turns each `.dsp` into C++):
 
-    gradle wrapper --gradle-version 8.9      # once; the wrapper is not committed
-    ./gradlew :app:assembleDebug
+    source tools/env.sh                      # paths of the local toolchain; edit for your machine
+    gradle assembleDebug                     # the app, and the fake Seaboard (fakeseaboard/)
+
+End to end on an emulator (boot one first, for example
+`emulator -avd <name> -no-window -no-audio`):
+
+    python3 -I tools/emulator_test.py
+
+`fakeseaboard/` is a small debug app that registers a virtual MIDI device called "Seaboard BLOCK
+(emulated)". The app connects to it exactly as it would to the real controller (MidiManager,
+then AMidi in the audio callback). The test drives it over adb: known notes on several
+instruments (the app records its own output and the pitch is measured), 30 s of the recorded
+session, a Bluetooth-style drop with the watchdog on and off, unplug and replug mid-note,
+instrument switching and an app restart. The debug build of the app has a `DebugReceiver` for
+this; release builds do not include it.
 
 Minimum Android 12 (API 31). Instruments are compiled in from the `third_party/mpe-instruments`
 submodule: add a `.dsp` there and rebuild.
@@ -50,7 +63,7 @@ The aim is that the phone is only needed for the last two rows.
 | Clean-up logic (held notes, panic, silence watchdog) | Unit tests on the desktop; engine is plain C++ | nothing |
 | Voice engine and instruments | Desktop build renders audio to a file; test checks pitch, level, no clicks, no hanging notes (as `tests/test_instruments.py` does in `mpe-instruments`) | nothing |
 | Real Seaboard behaviour | Replay a recorded capture (from `aseqdump`) through the engine; same file every run | one capture |
-| App on Android (JNI, service, UI, audio output starts) | Android emulator (x86_64, KVM). A debug build has a virtual MIDI device and an `adb` command that injects MIDI bytes. Audio is dumped to a file so a test can check it | emulator |
+| App on Android (MIDI connection, JNI, service, audio, safety) | `tools/emulator_test.py` with the fake Seaboard; the app records its own output and the test measures it | emulator |
 | USB permission, real Bluetooth, real latency | Real phone with the Seaboard | phone |
 
 Emulator limits, so nothing surprises us: it cannot see the Seaboard over USB or

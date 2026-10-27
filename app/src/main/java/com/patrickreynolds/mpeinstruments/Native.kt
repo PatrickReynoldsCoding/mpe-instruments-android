@@ -25,6 +25,11 @@ object Native {
     external fun nativeResetLatencyTuner()
     external fun nativeStats(): DoubleArray
 
+    // Debug: record the audio output (used by the emulator tests).
+    external fun nativeCaptureStart(seconds: Float): Boolean
+    external fun nativeCaptureProgress(): Double
+    external fun nativeCaptureSave(path: String): Boolean
+
     data class Instrument(val index: Int, val id: String, val group: String, val name: String, val description: String)
 
     fun instruments(): List<Instrument> = (0 until nativeInstrumentCount()).map {

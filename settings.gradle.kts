@@ -7,3 +7,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "mpe-instruments-android"
 include(":app")
+include(":fakeseaboard")

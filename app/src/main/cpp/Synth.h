@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 #include <amidi/AMidi.h>
 #include <oboe/Oboe.h>
 #include <oboe/LatencyTuner.h>
@@ -43,6 +44,11 @@ public:
     static constexpr int kStatCount = 18;
     void fillStats(double out[kStatCount]);
 
+    // Debug: record what the audio callback produced, so tests can check the real output.
+    bool captureStart(double seconds);              // control thread
+    double captureProgress() const;                 // 0..1
+    bool captureSave(const char* wavPath);          // after progress reaches 1
+
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* stream, void* data, int32_t frames) override;
     void onErrorAfterClose(oboe::AudioStream* stream, oboe::Result error) override;
 
@@ -66,6 +72,12 @@ private:
     std::atomic<bool> lost_{false};                 // tell the audio thread to release every note
     std::atomic<bool> portBroken_{false};
     std::atomic<uint64_t> midiBytes_{0}, midiErrors_{0};
+
+    // debug capture: written by the audio thread only while armed
+    std::vector<float> cap_;
+    std::atomic<int64_t> capPos_{0}, capLen_{0};
+    std::atomic<bool> capArmed_{false};
+    int capRate_ = 48000;
 
     // settings
     std::atomic<int> instrument_{0}, transpose_{0}, watchdogMs_{0};

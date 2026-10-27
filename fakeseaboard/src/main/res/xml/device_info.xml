@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One output port: the device sends to apps, like the real controller. The name contains
+     "Seaboard" so the app's auto-connect picks it up. -->
+<devices>
+    <device manufacturer="ROLI (emulated)" product="Seaboard BLOCK" name="Seaboard BLOCK (emulated)">
+        <output-port name="out" />
+    </device>
+</devices>

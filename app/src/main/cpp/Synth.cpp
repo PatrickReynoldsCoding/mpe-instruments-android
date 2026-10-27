@@ -1,6 +1,8 @@
 #include "Synth.h"
 #include <android/log.h>
+#include <cstdio>
 #include <cstring>
+#include <algorithm>
 
 #define TAG "mpe"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -89,6 +91,13 @@ oboe::DataCallbackResult Synth::onAudioReady(oboe::AudioStream* stream, void* da
     if (lost_.exchange(false)) midi_->deviceLost();
     pollMidi(now);
     audioEngine_->render(static_cast<float*>(data), frames, now);
+    if (capArmed_.load(std::memory_order_acquire)) {
+        const int64_t pos = capPos_.load(std::memory_order_relaxed), len = capLen_.load(std::memory_order_relaxed);
+        const int64_t n = std::min<int64_t>(frames, len - pos);
+        std::memcpy(cap_.data() + 2 * pos, data, sizeof(float) * 2 * n);
+        capPos_.store(pos + n, std::memory_order_release);
+        if (pos + n >= len) capArmed_.store(false, std::memory_order_release);
+    }
     if (tuner_) tuner_->tune();
     (void)stream;
     return oboe::DataCallbackResult::Continue;
@@ -182,4 +191,42 @@ void Synth::fillStats(double o[kStatCount]) {
     }
     o[16] = (double)midiBytes_.load();
     o[17] = port_.load() ? (portBroken_.load() ? -1 : 1) : 0;
+}
+
+bool Synth::captureStart(double seconds) {
+    if (capArmed_.load()) return false;
+    auto e = engine();
+    capRate_ = e ? e->sampleRate() : 48000;
+    const int64_t frames = int64_t(seconds * capRate_);
+    cap_.assign(size_t(frames) * 2, 0.f);              // the audio thread does not touch cap_ while unarmed
+    capLen_ = frames;
+    capPos_ = 0;
+    capArmed_.store(true, std::memory_order_release);
+    LOGI("capture: recording %.1f s", seconds);
+    return true;
+}
+
+double Synth::captureProgress() const {
+    const int64_t len = capLen_.load();
+    return len ? double(capPos_.load(std::memory_order_acquire)) / len : 0;
+}
+
+// 16-bit stereo WAV.
+bool Synth::captureSave(const char* path) {
+    if (capArmed_.load() || capLen_.load() == 0) return false;
+    FILE* f = std::fopen(path, "wb");
+    if (!f) return false;
+    const uint32_t frames = uint32_t(capPos_.load()), dataBytes = frames * 4;
+    auto u32 = [&](uint32_t v) { std::fwrite(&v, 4, 1, f); };
+    auto u16 = [&](uint16_t v) { std::fwrite(&v, 2, 1, f); };
+    std::fwrite("RIFF", 1, 4, f); u32(36 + dataBytes); std::fwrite("WAVEfmt ", 1, 8, f);
+    u32(16); u16(1); u16(2); u32(capRate_); u32(capRate_ * 4); u16(4); u16(16);
+    std::fwrite("data", 1, 4, f); u32(dataBytes);
+    for (uint32_t i = 0; i < frames * 2; i++) {
+        int16_t v = int16_t(std::max(-1.f, std::min(1.f, cap_[i])) * 32767.f);
+        std::fwrite(&v, 2, 1, f);
+    }
+    std::fclose(f);
+    LOGI("capture: saved %u frames to %s", frames, path);
+    return true;
 }
