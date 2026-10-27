@@ -25,6 +25,9 @@ object MidiConnector {
     private var currentId = -1
     private var started = false
 
+    /** MidiDeviceInfo.id of the connected device, -1 when none. */
+    val connectedId get() = currentId
+
     /** Name shown in the UI, "" when nothing is connected. */
     @Volatile var connectedName: String = ""
         private set

@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.view.WindowInsets
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -103,8 +104,7 @@ class MainActivity : Activity() {
     private fun buildUi(): View {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(24)) }
 
-        root.addView(label("MPE Instruments", bold = true).apply { textSize = 22f })
-        status = TextView(this).apply { textSize = 16f }
+        status = TextView(this).apply { textSize = 18f; setTypeface(typeface, Typeface.BOLD) }
         root.addView(status)
 
         root.addView(label("Controller", bold = true))
@@ -159,7 +159,20 @@ class MainActivity : Activity() {
         stats = TextView(this).apply { typeface = Typeface.MONOSPACE; textSize = 13f }
         root.addView(stats)
 
-        return ScrollView(this).apply { addView(root) }
+        // Android 15 draws apps edge to edge: keep the content clear of the bars and the cutout.
+        val scroll = ScrollView(this).apply { addView(root) }
+        scroll.setOnApplyWindowInsetsListener { v, insets ->
+            val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            v.setPadding(bars.left, bars.top + actionBarHeight(), bars.right, bars.bottom)
+            insets
+        }
+        return scroll
+    }
+
+    private fun actionBarHeight(): Int {
+        val tv = android.util.TypedValue()
+        return if (actionBar?.isShowing == true && theme.resolveAttribute(android.R.attr.actionBarSize, tv, true))
+            android.util.TypedValue.complexToDimensionPixelSize(tv.data, resources.displayMetrics) else 0
     }
 
     private fun applySavedSettings() {
@@ -182,7 +195,7 @@ class MainActivity : Activity() {
         val connected = MidiConnector.connectedName
         status.text = if (connected.isEmpty()) "No controller connected" else "Connected: $connected"
         if (connected.isNotEmpty()) deviceList.addView(button("Disconnect $connected") { MidiConnector.disconnect() })
-        for (info in MidiConnector.devices())
+        for (info in MidiConnector.devices().filter { it.id != MidiConnector.connectedId })
             deviceList.addView(button("Connect: ${MidiConnector.name(info)}") { MidiConnector.connect(info) })
         for (d in bleSeen.values)
             deviceList.addView(button("Connect (Bluetooth): ${d.name ?: d.address}") { MidiConnector.connectBluetooth(d) })
@@ -205,9 +218,10 @@ class MainActivity : Activity() {
             appendLine("burst / buffer    ${s.burstFrames} / ${s.bufferFrames} frames  (${ms(1000.0 * s.bufferFrames / s.sampleRate.coerceAtLeast(1))} ms)")
             appendLine("underruns         ${s.xruns}")
             appendLine()
-            appendLine("MIDI -> synth     avg ${ms(s.eventAgeAvgMs)} ms   max ${ms(s.eventAgeMaxMs)} ms")
+            val played = s.events > 0                // no MIDI yet: the MIDI half is unknown, not zero
+            appendLine("MIDI -> synth     avg ${if (played) ms(s.eventAgeAvgMs) else "  n/a"} ms   max ${if (played) ms(s.eventAgeMaxMs) else "  n/a"} ms")
             appendLine("synth -> speaker  ${ms(s.outputLatencyMs)} ms   (buffer + hardware)")
-            appendLine("total             ${ms(s.totalMs)} ms   (from Android receiving the note)")
+            appendLine("total             ${if (played) ms(s.totalMs) else "  n/a"} ms   (from Android receiving the note)")
             appendLine()
             appendLine("cpu load          avg ${"%.1f".format(s.loadAvg * 100)}%   peak ${"%.1f".format(s.loadPeak * 100)}%")
             appendLine("voices            ${s.voices}")
