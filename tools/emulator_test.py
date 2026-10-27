@@ -299,9 +299,13 @@ if want("switch"):
     time.sleep(1)
 
 # ---- 6. screen off: the foreground service must keep the audio and MIDI going -----------------
-if want("screen"):
+# Some phones (Xiaomi without "USB debugging (Security settings)") refuse injected key presses.
+can_sleep = want("screen") and subprocess.run(ADB + ["shell", "input", "keyevent", "KEYCODE_SLEEP"],
+                                              capture_output=True).returncode == 0
+if want("screen") and not can_sleep:
+    print("SKIP  screen off: this phone refuses injected key presses; test it by hand with the power button")
+if can_sleep:
     app_cmd("SET", "--es", "instrument", "strings/cello")
-    adb("shell", "input", "keyevent", "KEYCODE_SLEEP")
     time.sleep(3)
     wav = record(4, "screenoff", lambda: fake_cmd("NOTE", "--ei", "channel", "6", "--ei", "note", "50", "--ef", "seconds", "2"))
     if wav:
@@ -323,16 +327,17 @@ if want("screen"):
     else:
         check("doze: recording", False)
     adb("shell", "dumpsys", "deviceidle", "unforce", check_rc=False)
-    adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
+    adb("shell", "input", "keyevent", "KEYCODE_WAKEUP", check_rc=False)
     adb("shell", "wm", "dismiss-keyguard", check_rc=False)
     time.sleep(1)
 
 # ---- 7. the audio server dies (what a route change or a media crash does): recover, no crash ---
 if want("audioserver"):
-    rooted = "root" in adb("root", check_rc=False) or adb("shell", "id", check_rc=False).startswith("uid=0")
-    if rooted:
+    # "adbd cannot run as root in production builds" also contains "root": ask the shell instead.
+    if "restarting" in adb("root", check_rc=False):
         time.sleep(3)
         adb("wait-for-device")
+    rooted = adb("shell", "id", check_rc=False).startswith("uid=0")
     if not rooted or not adb("shell", "pidof", "audioserver", check_rc=False).strip():
         print("SKIP  audioserver: needs a rooted emulator (adb root)")
     else:

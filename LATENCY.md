@@ -29,19 +29,24 @@ finger -> Seaboard scan ----- USB or BLE ----- Android MIDI service -> [app call
    the status screen says which one was granted and whether MMAP is in use.
 2. **Native sample rate.** No `setSampleRate`. Forcing 44.1 kHz on a 48 kHz device sends audio
    through a slower path. The engine takes whatever rate the stream gives it.
-3. **Small buffer, tuned automatically.** The buffer starts at 2 bursts. Oboe's `LatencyTuner`
-   lowers it as far as it can without underruns and raises it if one happens. "Reset latency
-   tuner" starts the search again.
-4. **MIDI is read inside the audio callback**, with the NDK AMidi API (`AMidiOutputPort_receive`
+3. **Small buffer, tuned automatically.** The buffer starts at 1 burst; each underrun adds one.
+   "Reset latency tuner" goes back to 1 burst. This is our own small tuner (`Synth::tune`), not
+   Oboe's `LatencyTuner`: that one has a floor of 2 bursts and counts the underrun many phones
+   report while a stream starts, so it never stays at 1. Ours ignores the first half second.
+4. **16-bit output.** Many vendor HALs offer their fastest output ("raw", `FAST|RAW`) only for
+   PCM_16, so the stream asks for I16 and the engine's float output is converted.
+5. **The audio thread pins itself to the fast cores.** Left alone, the scheduler puts a light
+   real-time thread on a little core, where a burst of notes takes far more of the callback.
+6. **MIDI is read inside the audio callback**, with the NDK AMidi API (`AMidiOutputPort_receive`
    is non-blocking, and Google says it is safe in an audio callback). There is no separate MIDI
    thread, no queue between threads on the hot path, and no Java or JNI call per message. A
    message waits at most until the next callback, which is one burst.
-5. **Callback rules.** The engine never allocates, locks, or logs in `render`. Instrument
+7. **Callback rules.** The engine never allocates, locks, or logs in `render`. Instrument
    switching is built off the audio thread and swapped in with an atomic pointer.
-6. **The stream is watched.** If the audio stream reports an impossible latency (it happens
+8. **The stream is watched.** If the audio stream reports an impossible latency (it happens
    after the audio server restarts: the stream keeps running but its timestamps are seconds
    off) a health check reopens it. The status screen counts these restarts.
-7. **No Java `MidiReceiver`.** That path goes through Binder, a Java thread and the garbage
+9. **No Java `MidiReceiver`.** That path goes through Binder, a Java thread and the garbage
    collector, and is the usual source of "Android MIDI is laggy" reports.
 
 ## What the status screen measures
@@ -86,11 +91,23 @@ small. The latency work can only be judged on real phones.
 
 | Phone | Android | Link | Audio path | burst/buffer | MIDI -> synth | synth -> speaker | finger -> sound (outside) |
 |---|---|---|---|---|---|---|---|
-| (not yet measured) | | | | | | | |
+| Xiaomi POCO F2 Pro (Snapdragon 865) | 12 (API 31) | USB, real Seaboard BLOCK | AAudio legacy, shared, fast track (no MMAP: `aaudio.mmap_policy=1`) | 192 / 192 | avg 2.4 ms, max 6.8 ms | 24-27 ms (speaker and wired headphones alike) | not measured yet |
+
+What the POCO F2 Pro taught us (2026-10-27):
+
+- Start of the day: 31 ms out (float, 2 bursts). Now 24-27 ms: 1 burst, kept by our own tuner.
+- The phone has a `FAST|RAW` output with a 144-frame HAL buffer, but its audio policy never
+  routes an app there: not with 16-bit, any usage, content type or sharing mode
+  (`tools/aaudio_probe.c` sweeps these over adb with no reinstall). Wired headphones gave the
+  same latency as the speaker, so the delay is in the driver/DSP, not speaker protection.
+- The audio thread ran on a little core (CPU 3). Pinned to the fast cores, the CPU peak with
+  the recorded session went from 78% to 36% of a callback.
+- Notes far above an instrument's range (the Seaboard was octave-shifted up ~5 octaves) all
+  sound at one pitch (the `freq` control tops out at 5000 Hz) and pushed the CPU peak to 123%.
 
 ## Ideas, not done
 
 - Android Dynamic Performance Framework (`PerformanceHintManager`) hints for the audio thread, API 33+.
 - Splitting the callback at the event's sample position so a note starts mid-burst, not at the start of it.
 - A full-duplex Oboe loopback test (OboeTester has one) to give the audio-only round trip for each phone.
-- Compare `Usage::Game` and `Usage::Media`.
+- ~~Compare `Usage::Game` and `Usage::Media`~~: no difference on the POCO F2 Pro.

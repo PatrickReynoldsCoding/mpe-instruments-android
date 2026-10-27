@@ -12,9 +12,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <sched.h>
 #include <amidi/AMidi.h>
 #include <oboe/Oboe.h>
-#include <oboe/LatencyTuner.h>
 #include "mpe/engine.h"
 
 class Synth : public oboe::AudioStreamDataCallback, public oboe::AudioStreamErrorCallback {
@@ -39,7 +39,7 @@ public:
     void setBendRange(float semitones);
     void setWatchdogMs(int ms);
     void panic();
-    void resetLatencyTuner() { if (tuner_) tuner_->requestReset(); }
+    void resetLatencyTuner() { tuneReset_ = true; }
 
     // Everything the status line shows. Order is fixed: see Stats.kt.
     static constexpr int kStatCount = 19;
@@ -58,6 +58,7 @@ private:
     void restartStream(const char* why);
     void healthLoop();
     void pollMidi(int64_t nowNs);
+    void tune(oboe::AudioStream* stream, int32_t frames);
     std::shared_ptr<mpe::Engine> engine() { std::lock_guard<std::mutex> g(mu_); return engine_; }
 
     std::mutex mu_;                                 // guards stream_ / engine_ pointers for non-audio threads
@@ -65,7 +66,17 @@ private:
     std::shared_ptr<mpe::Engine> engine_;
     mpe::Engine* audioEngine_ = nullptr;            // what the audio thread uses; changed only while the stream is closed
     std::unique_ptr<mpe::MidiInput> midi_;          // used only on the audio thread
-    std::unique_ptr<oboe::LatencyTuner> tuner_;
+    // latency tuner state (see tune()); audio thread only, except the reset request
+    int64_t tuneFrames_ = 0;                        // frames played since the stream opened, up to half a second
+    int32_t tuneXruns_ = 0;
+    bool tuneBaseSet_ = false;
+    std::atomic<bool> tuneReset_{false};
+    bool floatOut_ = true;                          // stream format is float, else 16-bit
+    std::vector<float> scratch_;                    // float render buffer for a 16-bit stream
+    cpu_set_t fastCores_{};                         // where the audio thread pins itself
+    int fastCoreCount_ = -1;                        // -1 = not looked up yet, 0 = all cores alike
+    pid_t pinnedTid_ = 0;                           // audio thread only
+    std::atomic<bool> pinned_{false};
     std::atomic<bool> running_{false};
     std::mutex restartMu_;                          // one stream restart at a time
     std::thread health_;
