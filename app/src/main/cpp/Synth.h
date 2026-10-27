@@ -70,5 +70,4 @@ private:
     // settings
     std::atomic<int> instrument_{0}, transpose_{0}, watchdogMs_{0};
     std::atomic<float> volume_{0.8f}, bendRange_{48.f};
-    std::atomic<int64_t> underruns_{0};
 };

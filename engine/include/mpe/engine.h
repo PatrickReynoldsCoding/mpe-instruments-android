@@ -35,6 +35,7 @@ struct Stats {
     // Time spent in render() as a fraction of the audio it produced. Over 1.0 = dropouts.
     double loadAvg = 0, loadPeak = 0;
     uint64_t events = 0, dropped = 0, panics = 0, blocks = 0;
+    uint64_t voiceResets = 0;     // voices that produced NaN/Inf and were silenced
 };
 
 struct InstrumentSet;
@@ -93,7 +94,7 @@ private:
 
     // stats, written by the audio thread
     std::atomic<double> ageSum_{0}, ageMax_{0}, ageLast_{0}, loadSum_{0}, loadPeak_{0};
-    std::atomic<uint64_t> ageCount_{0}, events_{0}, dropped_{0}, panics_{0}, blocks_{0};
+    std::atomic<uint64_t> ageCount_{0}, events_{0}, dropped_{0}, panics_{0}, blocks_{0}, voiceResets_{0};
 };
 
 // MIDI thread front end: bytes in, cleaned messages queued for the engine.

@@ -1,0 +1,14 @@
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/plucked_nylon_guitar.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/plucked_steel_guitar.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/strings_cello.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/strings_violin.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/struck_marimba.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/struck_vibraphone.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/synths_fm_keys.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/synths_lead.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/synths_pad.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/voices_bass.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/voices_soprano.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/voices_tenor.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/winds_clarinet.cpp.rule
+/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/gen/winds_flute.cpp.rule

@@ -218,11 +218,20 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
             sl.d->compute(n, ins, outs);
             const float* r = cur_->outputs > 1 ? bufR : bufL;
             float e = 0;
-            for (int i = 0; i < n; i++) { mixL[i] += bufL[i]; mixR[i] += r[i]; e += bufL[i] * bufL[i]; }
-            c.level = smoothTo(c.level, std::sqrt(e / n), 0.2f);
+            for (int i = 0; i < n; i++) e += bufL[i] * bufL[i] + r[i] * r[i];
+            if (!std::isfinite(e) || e > 1e6f) {
+                // The instrument blew up (NaN/Inf or runaway feedback, e.g. a note far outside its
+                // range). Drop this block, reset the voice, and let the rest of the mix play on.
+                sl.d->instanceClear();
+                c.sounding = false;
+                c.level = 0;
+                voiceResets_++;
+                continue;
+            }
+            for (int i = 0; i < n; i++) { mixL[i] += bufL[i]; mixR[i] += r[i]; }
+            c.level = smoothTo(c.level, std::sqrt(e / (2 * n)), 0.2f);
             if (!held) c.quietSamples = (c.level < 3e-5f) ? c.quietSamples + n : 0;
             if (!held && c.quietSamples > quietLimit) c.sounding = false;     // fully decayed
-            voices++;
         }
         for (int i = 0; i < n; i++) {                                // soft limiter
             out[2 * (done + i)] = std::tanh(mixL[i] * vol * 1.5f) * 0.7f;
@@ -230,6 +239,7 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
         }
         done += n;
     }
+    for (int chn = 1; chn < kChannels; chn++) voices += ch_[chn].sounding;
     activeVoices_ = voices;
     frameCounter_ += frames;
 
@@ -252,6 +262,7 @@ Stats Engine::stats() const {
     s.events = events_.load();
     s.dropped = dropped_.load();
     s.panics = panics_.load();
+    s.voiceResets = voiceResets_.load();
     return s;
 }
 

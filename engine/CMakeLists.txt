@@ -18,12 +18,12 @@ endif()
 set(MPE_INSTRUMENTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/mpe-instruments"
     CACHE PATH "checkout of faust-mpe-instruments")
 set(FAUST_EXECUTABLE faust CACHE STRING "faust compiler")
-execute_process(COMMAND ${FAUST_EXECUTABLE} --includedir OUTPUT_VARIABLE FAUST_INC_DEFAULT
-                OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE faust_rc)
+execute_process(COMMAND ${FAUST_EXECUTABLE} --version OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE faust_rc)
 if(NOT faust_rc EQUAL 0)
   message(FATAL_ERROR "cannot run '${FAUST_EXECUTABLE}'. Install Faust, or pass -DFAUST_EXECUTABLE=...")
 endif()
-set(FAUST_INCLUDE_DIR "${FAUST_INC_DEFAULT}" CACHE PATH "directory that holds faust/dsp/dsp.h")
+# Our own copy of the few Faust headers needed (see third_party/faust/README.md).
+set(FAUST_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/faust/include")
 
 file(GLOB_RECURSE DSP_FILES RELATIVE "${MPE_INSTRUMENTS_DIR}/instruments" CONFIGURE_DEPENDS
      "${MPE_INSTRUMENTS_DIR}/instruments/*/*.dsp")
