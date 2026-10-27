@@ -70,8 +70,13 @@ def record(seconds, name, during):
     line = wait_log(mark, r"RECORD (saved|failed) .*" + name, seconds + 15)
     if not line or "failed" in line: return None
     local = os.path.join(OUT, name + ".wav")
-    adb("pull", f"/sdcard/Android/data/{APP}/files/{name}.wav", local)
-    return local
+    # The file can take a moment to become visible through shared storage on a slow machine.
+    for attempt in range(10):
+        r = subprocess.run(ADB + ["pull", f"/sdcard/Android/data/{APP}/files/{name}.wav", local], capture_output=True, text=True)
+        if r.returncode == 0: return local
+        time.sleep(0.5)
+    print(f"      could not pull {name}.wav: {r.stderr.strip() or r.stdout.strip()}")
+    return None
 
 def analyze(wav, hz=None, a=None, b=None):
     cmd = [sys.executable, "-I", os.path.join(ROOT, "tools", "analyze_wav.py"), wav]
