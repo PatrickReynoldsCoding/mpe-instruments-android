@@ -1,0 +1,53 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  engine:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Install Faust and CMake
+        run: sudo apt-get update && sudo apt-get install -y faust faust-common cmake g++
+      - name: Build engine and run tests
+        run: |
+          cmake -S engine -B engine/build
+          cmake --build engine/build -j"$(nproc)"
+          cd engine/build && ctest --output-on-failure
+      - name: Cost of 8 fingers (for the log)
+        run: engine/build/tools/bench 8 96 2
+
+  engine-sanitizers:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix: { san: [address, undefined, thread] }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - run: sudo apt-get update && sudo apt-get install -y faust faust-common cmake g++
+      - name: Build and test with ${{ matrix.san }} sanitizer
+        run: |
+          cmake -S engine -B engine/build -DMPE_SANITIZE=${{ matrix.san }}
+          cmake --build engine/build -j"$(nproc)"
+          cd engine/build && ctest --output-on-failure
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+      - name: Install Faust (the build turns each .dsp into C++)
+        run: sudo apt-get update && sudo apt-get install -y faust faust-common
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
