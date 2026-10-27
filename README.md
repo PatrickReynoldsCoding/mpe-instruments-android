@@ -9,9 +9,30 @@ the MIDI stream clean, so a lost link never leaves a stuck note (the logic from
 Seaboard -> android.media.midi -> core (clean) -> voice engine (Faust) -> Oboe -> speaker
 ```
 
-Status: planning. Nothing is built yet.
+Status: the engine (`engine/`) is built and tested on the desktop. The Android app
+(`app/`) is written but has **never been compiled or run**: it was written on a machine without
+the Android SDK. Expect a first build to need small fixes. See [LATENCY.md](LATENCY.md) for the
+low-latency design and what still has to be measured on a real phone.
 
-## Layout (planned)
+## Build and test
+
+Engine, on the desktop (needs `cmake`, a C++17 compiler, and `faust`):
+
+    git clone --recurse-submodules https://github.com/PatrickReynoldsCoding/mpe-instruments-android
+    cd mpe-instruments-android/engine
+    cmake -S . -B build && cmake --build build -j && (cd build && ctest --output-on-failure)
+    ./build/tools/bench 8 96 3        # cost of 8 fingers, 96-frame callbacks
+
+Android app (needs Android Studio or the command-line SDK with NDK, JDK 17, and `faust` on the
+machine running Gradle, because the build turns each `.dsp` into C++):
+
+    gradle wrapper --gradle-version 8.9      # once; the wrapper is not committed
+    ./gradlew :app:assembleDebug
+
+Minimum Android 12 (API 31). Instruments are compiled in from the `third_party/mpe-instruments`
+submodule: add a `.dsp` there and rebuild.
+
+## Layout
 
 ```
 engine/    C++: clean-up core + voice engine + generated Faust instruments. No Android code.
