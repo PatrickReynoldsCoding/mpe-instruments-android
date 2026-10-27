@@ -146,7 +146,8 @@ int main() {
     }
     {   // latency bookkeeping: a message that arrived 5 ms before the block started
         Rig r("strings/cello");
-        r.in.feed((const uint8_t[]){0xD1, 10, 0}, 2, r.clockNs - 5000000);
+        const uint8_t press[2] = {0xD1, 10};
+        r.in.feed(press, 2, r.clockNs - 5000000);
         r.run(0.01);
         Stats s = r.engine.stats();
         CHECK(std::fabs(s.eventAgeLastMs - 5.0) < 0.01, "event age is measured (%.3f ms)", s.eventAgeLastMs);
@@ -159,7 +160,8 @@ int main() {
         for (int i = 0; i < 200; i++) {
             int64_t blockStart = r.clockNs;
             int64_t arrive = blockStart - int64_t(1e9 * (i % block) / kSr);       // arrives somewhere in the previous block
-            r.in.feed((const uint8_t[]){0xD1, uint8_t(i & 127), 0}, 2, arrive);
+            const uint8_t press[2] = {0xD1, uint8_t(i & 127)};
+            r.in.feed(press, 2, arrive);
             r.engine.render(buf.data(), block, blockStart);
             r.clockNs += int64_t(1e9 * block / kSr);
             worst = std::max(worst, r.engine.stats().eventAgeLastMs);
