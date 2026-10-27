@@ -32,7 +32,7 @@ class SynthService : Service() {
     }
 
     override fun onDestroy() {
-        MidiConnector.disconnect()
+        MidiConnector.release()
         Native.nativeStop()
         super.onDestroy()
     }

@@ -38,8 +38,11 @@ the cable is probably charge-only.
 ## 4. Seaboard over Bluetooth
 
 Turn the Seaboard's Bluetooth on (see its manual). In the app: **Scan for Bluetooth LE
-controllers**, then tap the Seaboard. Set the watchdog to **1500 ms**. Play, and screenshot
-the numbers again. Walk away with the Seaboard until the link drops: the sound must stop.
+controllers**, then tap the Seaboard. Leave the watchdog on **auto** (1500 ms on Bluetooth).
+Play, and screenshot the numbers again. Walk away with the Seaboard until the link drops: the
+sound must stop within about 1.5 s, and the app should say it is waiting for the Seaboard.
+Walk back: it should reconnect by itself. (On the emulator Android took about 30 s to report a
+lost Bluetooth link; the watchdog is what stops the sound sooner.)
 
 ## 5. Finger to sound, measured from outside
 

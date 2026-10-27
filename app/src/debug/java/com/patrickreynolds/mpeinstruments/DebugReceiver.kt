@@ -12,6 +12,7 @@ import java.io.File
  *   ... -a STATS
  *   ... -a SET --es instrument strings/cello --ei watchdog 1500 --ei transpose 0 --ef volume 0.8
  *   ... -a PANIC
+ *   ... -a BLE_CONNECT --ef seconds 15     scan for a BLE MIDI device, connect to the first found
  * Recordings are saved to /sdcard/Android/data/com.patrickreynolds.mpeinstruments/files/<name>.wav
  */
 class DebugReceiver : BroadcastReceiver() {
@@ -51,6 +52,24 @@ class DebugReceiver : BroadcastReceiver() {
                 Log.i(TAG, "SET done")
             }
             "PANIC" -> { Native.nativePanic(); Log.i(TAG, "PANIC done") }
+            "BLE_CONNECT" -> {
+                val seconds = intent.getFloatExtra("seconds", 15f)
+                var done = false
+                lateinit var scanner: BleScanner
+                scanner = BleScanner(context.applicationContext) { device ->
+                    if (done) return@BleScanner
+                    done = true
+                    scanner.stop()
+                    Log.i(TAG, "BLE_CONNECT found ${device.address}, connecting")
+                    MidiConnector.connectBluetooth(device)
+                }
+                if (!scanner.available) { Log.w(TAG, "BLE_CONNECT: Bluetooth is off"); return }
+                scanner.start()
+                Log.i(TAG, "BLE_CONNECT scanning")
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    if (!done) { scanner.stop(); Log.w(TAG, "BLE_CONNECT: nothing found in ${seconds}s") }
+                }, (seconds * 1000).toLong())
+            }
             else -> Log.w(TAG, "unknown command ${intent.action}")
         }
     }

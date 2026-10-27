@@ -15,6 +15,8 @@ import android.util.Log
  *   ... -a STOP            stop and lift every finger
  *   ... -a SILENCE         stop mid-note with no note-off (a dropped Bluetooth link)
  *   ... -a UNPLUG / PLUG   remove / add the device, like pulling the USB cable
+ *   ... -a BLE_START       also be a Bluetooth LE MIDI device (advertise; for a second emulator or phone)
+ *   ... -a BLE_STOP        drop the Bluetooth link, like walking out of range
  */
 class CommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -45,6 +47,8 @@ class CommandReceiver : BroadcastReceiver() {
                 context.packageManager.setComponentEnabledSetting(
                     ComponentName(context, FakeSeaboardService::class.java), state, PackageManager.DONT_KILL_APP)
             }
+            "BLE_START" -> BlePeripheral.start(context.applicationContext)
+            "BLE_STOP" -> { Player.stop(releaseNotes = false); BlePeripheral.stop() }
             else -> Log.w(tag, "unknown command ${intent.action}")
         }
     }

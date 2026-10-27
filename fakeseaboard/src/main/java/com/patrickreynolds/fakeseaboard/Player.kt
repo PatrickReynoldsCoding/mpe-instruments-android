@@ -18,7 +18,7 @@ object Player {
         dropOffs = false
         thread = Thread({
             val svc = FakeSeaboardService.instance
-            if (svc == null) { Log.w(TAG, "no app has the device open: nothing to play to"); return@Thread }
+            if (svc == null && !BlePeripheral.connected) { Log.w(TAG, "no app has the device open: nothing to play to"); return@Thread }
             Log.i(TAG, "PLAY start $label: ${timeline.size} messages, ${"%.1f".format(timeline.lastOrNull()?.seconds ?: 0.0)} s, speed $speed")
             val t0 = System.nanoTime()
             var sent = 0
@@ -32,7 +32,7 @@ object Player {
                 }
                 if (stopRequested) break
                 track(m.bytes)
-                svc.send(m.bytes)
+                send(m.bytes)
                 sent++
             }
             Log.i(TAG, "PLAY end $label: sent $sent messages in ${"%.2f".format((System.nanoTime() - t0) / 1e9)} s${if (stopRequested) " (stopped)" else ""}")
@@ -55,11 +55,16 @@ object Player {
         stopRequested = true
         thread?.join(500)
         thread = null
-        val svc = FakeSeaboardService.instance ?: return
         for (ch in 0 until 16) {
-            if (held[ch] >= 0 && releaseNotes) svc.send(byteArrayOf((0x80 or ch).toByte(), held[ch].toByte(), 0))
+            if (held[ch] >= 0 && releaseNotes) send(byteArrayOf((0x80 or ch).toByte(), held[ch].toByte(), 0))
             held[ch] = -1
         }
+    }
+
+    /** To whoever is listening: an app on this device (virtual MIDI) and/or a phone over Bluetooth. */
+    private fun send(b: ByteArray) {
+        FakeSeaboardService.instance?.send(b)
+        BlePeripheral.send(b)
     }
 
     /**

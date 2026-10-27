@@ -34,12 +34,21 @@ End to end on an emulator (boot one first, for example
 
     python3 -I tools/emulator_test.py
 
+Bluetooth LE MIDI, with a second emulator as the Seaboard (emulators on one machine share a
+virtual Bluetooth radio):
+
+    emulator -avd <name2> -port 5556 -no-window -no-audio &
+    python3 -I tools/emulator_test.py --serial emulator-5554 --ble-peer emulator-5556
+
 `fakeseaboard/` is a small debug app that registers a virtual MIDI device called "Seaboard BLOCK
 (emulated)". The app connects to it exactly as it would to the real controller (MidiManager,
 then AMidi in the audio callback). The test drives it over adb: known notes on several
 instruments (the app records its own output and the pitch is measured), 30 s of the recorded
 session, a Bluetooth-style drop with the watchdog on and off, unplug and replug mid-note,
-instrument switching and an app restart. The debug build of the app has a `DebugReceiver` for
+instrument switching, screen off and Doze, the audio server dying, a stress run, and an app
+restart. In `--ble-peer` mode the same app is a Bluetooth LE MIDI device (the BLE-MIDI GATT
+service) on the other emulator: scan and connect, notes and the session over Bluetooth, the link
+lost mid-note, and automatic reconnection. The debug build of the app has a `DebugReceiver` for
 this; release builds do not include it.
 
 Minimum Android 12 (API 31). Instruments are compiled in from the `third_party/mpe-instruments`

@@ -69,8 +69,10 @@ callback").
   within one second of "now", otherwise it counts the message as arriving at the callback.
   Check on a real phone that "MIDI -> synth" is a believable few milliseconds and not zero.
 - **Whether exclusive/MMAP is granted** on the target phone. The status screen shows it.
-- **Bluetooth connection interval.** With the framework's BLE MIDI the app cannot set it.
-  Compare against the same controller on iOS if you can.
+- **Bluetooth connection interval.** The app cannot set it, but Android's own Bluetooth MIDI
+  service already asks for the shortest one: its log shows
+  `requestConnectionPriority(CONNECTION_PRIORITY_HIGH):true` on every connection (seen on the
+  emulator). The interval the phone and the Seaboard actually agree on still needs measuring.
 
 ## What the emulator says (and does not)
 

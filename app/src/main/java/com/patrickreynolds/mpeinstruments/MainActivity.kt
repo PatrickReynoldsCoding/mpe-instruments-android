@@ -144,10 +144,11 @@ class MainActivity : Activity() {
             Native.nativeSetBendRange(ranges[i]); prefs.edit().putFloat("bend", ranges[i]).apply()
         })
 
-        root.addView(label("Stuck-note watchdog (release notes if the link goes silent; use for Bluetooth)"))
-        val dogs = listOf(0, 500, 1500, 3000)
-        root.addView(spinner(dogs.map { if (it == 0) "off" else "$it ms" }, dogs.indexOf(prefs.getInt("watchdog", 0)).coerceAtLeast(0)) { i ->
-            Native.nativeSetWatchdogMs(dogs[i]); prefs.edit().putInt("watchdog", dogs[i]).apply()
+        root.addView(label("Stuck-note watchdog: release notes if the link goes silent"))
+        val dogs = listOf(-1, 0, 500, 1500, 3000)
+        root.addView(spinner(dogs.map { when (it) { -1 -> "auto (1500 ms on Bluetooth, off on USB)"; 0 -> "off"; else -> "$it ms" } },
+                             dogs.indexOf(MidiConnector.watchdogSetting).coerceAtLeast(0)) { i ->
+            MidiConnector.watchdogSetting = dogs[i]
         })
 
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -179,7 +180,6 @@ class MainActivity : Activity() {
         Native.nativeSetInstrument(prefs.getInt("instrument", instruments.indexOfFirst { it.id == "strings/cello" }.coerceAtLeast(0)))
         Native.nativeSetVolume(prefs.getFloat("volume", 0.8f))
         Native.nativeSetBendRange(prefs.getFloat("bend", 48f))
-        Native.nativeSetWatchdogMs(prefs.getInt("watchdog", 0))
         setTranspose(prefs.getInt("transpose", 0))
     }
 
@@ -193,7 +193,12 @@ class MainActivity : Activity() {
     private fun showDevices() {
         deviceList.removeAllViews()
         val connected = MidiConnector.connectedName
-        status.text = if (connected.isEmpty()) "No controller connected" else "Connected: $connected"
+        val waiting = MidiConnector.reconnecting
+        status.text = when {
+            connected.isNotEmpty() -> "Connected: $connected"
+            waiting.isNotEmpty() -> "Waiting for $waiting to come back (Bluetooth)..."
+            else -> "No controller connected"
+        }
         if (connected.isNotEmpty()) deviceList.addView(button("Disconnect $connected") { MidiConnector.disconnect() })
         for (info in MidiConnector.devices().filter { it.id != MidiConnector.connectedId })
             deviceList.addView(button("Connect: ${MidiConnector.name(info)}") { MidiConnector.connect(info) })
