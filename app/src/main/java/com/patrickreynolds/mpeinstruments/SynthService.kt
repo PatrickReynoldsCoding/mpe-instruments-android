@@ -22,7 +22,7 @@ class SynthService : Service() {
         val notification = Notification.Builder(this, CHANNEL)
             .setContentTitle("MPE Instruments")
             .setContentText("Ready to play")
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(open)
             .addAction(Notification.Action.Builder(null, "Stop",
                 PendingIntent.getService(this, 1, Intent(this, SynthService::class.java).setAction(ACTION_STOP),
@@ -31,6 +31,7 @@ class SynthService : Service() {
             .build()
         startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         Native.nativeStart()
+        AppState.init(applicationContext)            // the saved instruments and settings, also when started without the screen
         MidiConnector.init(applicationContext)
         return START_NOT_STICKY
     }

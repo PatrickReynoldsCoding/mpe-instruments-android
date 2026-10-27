@@ -1,18 +1,40 @@
 # mpe-instruments-android
 
 An Android app that plays the Faust instruments from `mpe-instruments` from a
-Seaboard BLOCK (or any MPE controller) over USB or Bluetooth LE. It also keeps
-the MIDI stream clean, so a lost link never leaves a stuck note (the logic from
-`seaboard-mpe`).
+Seaboard BLOCK (or any MPE controller) over USB or Bluetooth LE, with low latency: about
+25 ms from note to sound on a POCO F2 Pro, measured ([LATENCY.md](LATENCY.md)).
 
 ```
-Seaboard -> android.media.midi -> core (clean) -> voice engine (Faust) -> Oboe -> speaker
+Seaboard -> android.media.midi -> core (clean) -> parts (play / arp) -> Faust voices -> effects -> Oboe
 ```
 
-Status: the engine is tested on the desktop, and the app builds and passes end-to-end tests on
-an Android emulator with an emulated Seaboard. It has **not yet run on a real phone or with the
-real controller**. See [LATENCY.md](LATENCY.md) for the low-latency design and what still has
-to be measured on a phone.
+What it does:
+
+- **14 physical-model and synth instruments**, each finger its own voice (MPE): pitch glides,
+  pressure swells, slide shapes the tone.
+- **Split and layer**: two instruments, left and right of a split point (or "learn" it from a
+  key), or both at once with their own octave and level.
+- **An MPE arpeggiator** per part: up, down, up-down, as played, random, chord; rate, gate,
+  octaves, latch. Each arpeggiated note keeps following the finger that holds it, so pressing
+  swells the arpeggio and sliding changes its tone. Arpeggiate the left hand, play the right.
+- **Pitch assist**: a finger that comes to rest is drawn onto the nearest note of a scale;
+  glides and vibrato are left alone.
+- **Sound**: per part brightness, drive, touch response, reverb and delay sends; a Zita reverb
+  and a tempo-synced ping-pong delay. Tap tempo.
+- **Presets**: ten built in, save your own.
+- **A live touch view** of every finger (pitch, slide, pressure) and what is sounding.
+- **An octave warning** when the controller's notes are far from the instrument's range.
+- Bluetooth reconnects by itself (can be turned off); Stop turns everything off.
+
+Status: the engine is tested on the desktop (sanitizers included), the app on an emulator with
+an emulated Seaboard over USB and Bluetooth LE, and on a real phone with the real Seaboard over
+USB. Bluetooth with the real Seaboard is not tested yet.
+
+## Install
+
+Download `MPE-Instruments-<version>.apk` from the [Releases](../../releases) page on the phone and
+open it (allow installing from your browser or file manager when Android asks). Android 12 or
+newer.
 
 ## Build and test
 
@@ -28,6 +50,7 @@ machine running Gradle, because the build turns each `.dsp` into C++):
 
     source tools/env.sh                      # paths of the local toolchain; edit for your machine
     gradle assembleDebug                     # the app, and the fake Seaboard (fakeseaboard/)
+    gradle assembleRelease                   # signed if a key is set up (MPE_SIGNING, see app/build.gradle.kts)
 
 End to end on an emulator (boot one first, for example
 `emulator -avd <name> -no-window -no-audio`):

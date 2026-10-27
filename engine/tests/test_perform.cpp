@@ -325,6 +325,67 @@ int main() {
         CHECK(std::fabs(c - 98.5) < 0.01, "note center: the average of the notes sent (%.1f)", c);
     }
 
+    // ---- sound: effects and expression ----
+    auto pluck = [](Performance p, double seconds, int note = 60) {
+        Rig r("struck/marimba");
+        r.engine.setPerformance(p);
+        r.run(0.01);
+        r.noteOn(1, note, 100);
+        r.run(0.05);
+        r.noteOff(1, note);
+        return r.run(seconds);
+    };
+    {
+        Performance dry, wet;
+        wet.part[0].reverb = 0.6f;
+        wet.reverbSize = 0.8f;
+        auto a = pluck(dry, 3.0), b = pluck(wet, 3.0);
+        const double ta = rms(a, 2 * kSr, 3 * kSr), tb = rms(b, 2 * kSr, 3 * kSr);
+        CHECK(finite(b) && tb > 10 * ta + 1e-4, "reverb: a tail 2-3 s after a marimba note (%.5f, dry %.5f)", tb, ta);
+    }
+    {
+        Performance wet;
+        wet.part[0].delay = 1.f;
+        wet.delayBeats = 0.5f;                              // 250 ms at 120 bpm
+        wet.delayFeedback = 0.f;
+        wet.delayPingPong = false;
+        auto x = pluck(wet, 1.0, 84);
+        // energy envelope in 10 ms windows, from the note on (0.05 s before the recording)
+        auto win = [&](double t) { size_t a = size_t((t - 0.05) * kSr); return rms(x, a, a + kSr / 100); };
+        const double echo = win(0.255), before = win(0.20);
+        CHECK(finite(x) && echo > 2 * before, "delay: an echo 250 ms after the note (%.4f vs %.4f just before)", echo, before);
+        wet.bpm = 60;                                       // the same half beat is now 500 ms
+        auto y = pluck(wet, 1.0, 84);
+        auto win2 = [&](double t) { size_t a = size_t((t - 0.05) * kSr); return rms(y, a, a + kSr / 100); };
+        CHECK(win2(0.505) > 2 * win2(0.45), "delay: follows the tempo (500 ms at 60 bpm)");
+    }
+    {
+        Performance bright, dark;
+        dark.part[0].brightness = 0.f;
+        auto hf = [](const std::vector<float>& x) {           // energy of the first difference ~ high frequencies
+            double d = 0, e = 0;
+            for (size_t i = 1; i < x.size(); i++) { d += double(x[i] - x[i - 1]) * (x[i] - x[i - 1]); e += double(x[i]) * x[i]; }
+            return d / (e + 1e-12);
+        };
+        const double hb = hf(pluck(bright, 0.3, 79)), hd = hf(pluck(dark, 0.3, 79));
+        CHECK(hd < hb * 0.5, "brightness 0: much less treble than open (%.4f vs %.4f)", hd, hb);
+    }
+    {
+        auto bowed = [](float curve) {
+            Rig r("synths/pad");                            // its level follows pressure (a bowed string's tone does)
+            Performance p;
+            p.part[0].pressureCurve = curve;
+            r.engine.setPerformance(p);
+            r.run(0.01);
+            r.noteOn(1, 48, 80);
+            r.press(1, 40);                                  // a light touch
+            auto x = r.run(1.0);
+            return rms(x, kSr / 2, kSr);
+        };
+        const double soft = bowed(0.5f), firm = bowed(2.f);
+        CHECK(soft > firm * 1.3, "pressure curve: 0.5 plays a light touch louder than 2 (%.4f vs %.4f)", soft, firm);
+    }
+
     // ---- what the touch view sees ----
     {
         Rig r("synths/fm-keys");

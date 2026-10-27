@@ -14,6 +14,8 @@ data class Stats(
     val midiBytes: Long,
     val midiState: Int,                   // 0 none, 1 attached, -1 broken
     val streamRestarts: Int,              // times the audio stream was reopened (errors, health check)
+    val noteCenter: Double,               // average of the last 16 notes the controller sent, -1 = none yet
+    val arpSteps: Long,
 ) {
     val pathName get() = when (path) { 2 -> "AAudio MMAP"; 1 -> "AAudio"; else -> "OpenSL ES" }
 
@@ -24,6 +26,6 @@ data class Stats(
         fun from(v: DoubleArray) = Stats(
             v[0], v[1], v[2], v[3], v[4], v[5].toInt(), v[6].toLong(), v[7].toLong(), v[8].toLong(),
             v[9].toInt(), v[10], v[11].toInt(), v[12].toInt(), v[13].toInt(), v[14] > 0, v[15].toInt(),
-            v[16].toLong(), v[17].toInt(), v[18].toInt())
+            v[16].toLong(), v[17].toInt(), v[18].toInt(), v[19], v[20].toLong())
     }
 }

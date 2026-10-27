@@ -42,6 +42,12 @@ struct PartConfig {
     bool latch = false;        // keep arpeggiating the last chord after the hand lifts
     int transpose = 0;         // semitones, on top of the engine's transpose
     float volume = 1;
+    // sound
+    float brightness = 1;      // 0 = dark (300 Hz low-pass) .. 1 = open (no filter)
+    float drive = 0;           // 0 = clean .. 1 = saturated
+    float pressureCurve = 1;   // pressure ^ curve: < 1 swells sooner, > 1 needs a firmer press
+    float reverb = 0;          // send to the master reverb, 0..1
+    float delay = 0;           // send to the master delay, 0..1
 };
 
 struct Performance {
@@ -53,6 +59,11 @@ struct Performance {
     uint16_t scaleMask = 0;    // bit n: (root + n) % 12 is in the scale; 0 = off
     int scaleRoot = 0;         // 0 = C
     float assist = 0;          // 0 = off .. 1 = locked to the scale
+    // master effects
+    float reverbSize = 0.5f, reverbDamp = 0.4f;
+    float delayBeats = 0.75f;  // delay time in beats (0.75 = dotted eighth), follows bpm
+    float delayFeedback = 0.35f;
+    bool delayPingPong = true;
 };
 
 // What is sounding, for the touch view and the tests. Copied out of the audio thread's state
@@ -126,12 +137,16 @@ private:
     int freeVoice(int p, int64_t frame);
     float assisted(float pitch, float& pull, float& prev, float& speed, float dt) const;
     void renderVoices(int p, float* mixL, float* mixR, int n, float dt);
+    void partFx(int p, float* l, float* r, int n);
+    void masterFx(float* mixL, float* mixR, const float* revL, const float* revR, const float* delL, const float* delR, int n);
+    struct Fx;
     void publish();
 
     const int sr_;
     Spsc<Msg> queue_{1024};
     std::unique_ptr<Channel[]> ch_;
     std::unique_ptr<Part[]> parts_;                 // 2; audio thread owns
+    std::unique_ptr<Fx> fx_;
     std::atomic<InstrumentSet*> pending_[2] = {};
     Spsc<InstrumentSet*> retired_{8};
     std::atomic<int> current_[2] = {{-1}, {-1}};

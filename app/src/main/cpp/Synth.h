@@ -33,7 +33,11 @@ public:
     bool midiAttached() const { return port_.load() != nullptr; }
 
     // Settings: remembered here so they survive the engine being rebuilt (sample rate change).
-    void setInstrument(int index);
+    void setInstrument(int index) { setInstrument(0, index); }
+    void setInstrument(int part, int index);
+    void setPerformance(const mpe::Performance& p);
+    int voices(mpe::VoiceView* out, int max);       // what is sounding, for the touch view
+    int fingers(mpe::FingerView* out, int max);
     void setVolume(float v);
     void setTranspose(int semitones);
     void setBendRange(float semitones);
@@ -42,7 +46,7 @@ public:
     void resetLatencyTuner() { tuneReset_ = true; }
 
     // Everything the status line shows. Order is fixed: see Stats.kt.
-    static constexpr int kStatCount = 19;
+    static constexpr int kStatCount = 21;
     void fillStats(double out[kStatCount]);
 
     // Debug: record what the audio callback produced, so tests can check the real output.
@@ -98,6 +102,7 @@ private:
     int capRate_ = 48000;
 
     // settings
-    std::atomic<int> instrument_{0}, transpose_{0}, watchdogMs_{0};
+    std::atomic<int> instrument_[2] = {{0}, {-1}}, transpose_{0}, watchdogMs_{0};
+    mpe::Performance perf_;                         // guarded by mu_
     std::atomic<float> volume_{0.8f}, bendRange_{48.f};
 };

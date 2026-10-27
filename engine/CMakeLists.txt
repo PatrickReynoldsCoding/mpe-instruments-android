@@ -59,6 +59,22 @@ foreach(rel ${DSP_FILES})
   string(APPEND REG_DECL "dsp* mpe_create_${fn}();\nconst char* mpe_meta_${fn}(const char*);\n")
 endforeach()
 
+# Effects from engine/fx/*.dsp: compiled like the instruments, but not in the instrument table.
+foreach(fx reverb)
+  set(fn "fx_${fx}")
+  set(gen "${GEN_DIR}/${fn}.cpp")
+  add_custom_command(
+    OUTPUT "${gen}"
+    COMMAND ${FAUST_EXECUTABLE} -lang cpp -i -cn Fx_${fx} -o "${gen}" "${CMAKE_CURRENT_SOURCE_DIR}/fx/${fx}.dsp"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/fx/${fx}.dsp"
+    COMMENT "faust fx/${fx}")
+  set(wrap "${GEN_DIR}/${fn}_entry.cpp")
+  file(WRITE "${wrap}" "#define GEN \"${gen}\"\n#define CLASS Fx_${fx}\n#define FN ${fn}\n#include \"${CMAKE_CURRENT_SOURCE_DIR}/src/instrument_entry.cpp\"\n")
+  set_source_files_properties("${wrap}" PROPERTIES OBJECT_DEPENDS "${gen}"
+                              COMPILE_FLAGS "-w -I${FAUST_INCLUDE_DIR}")
+  list(APPEND INSTR_SOURCES "${wrap}")
+endforeach()
+
 # registry.cpp: the table of instruments. Names come from each .dsp's `declare name`.
 set(REG "#include \"mpe/engine.h\"\n#include <string>\n#include <vector>\n#include <cstring>\n#include <cstdlib>\n${REG_DECL}\nnamespace mpe {\n")
 string(APPEND REG "static std::vector<InstrumentInfo> build() {\n  std::vector<InstrumentInfo> v;\n")

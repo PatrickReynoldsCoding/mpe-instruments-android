@@ -9,7 +9,7 @@ over adb. The fake Seaboard plays notes, replays the recorded session, drops the
 unplugged; the app records its own audio output, which is pulled back and measured here.
 Nothing needs a real controller. Needs an emulator that is already booted.
 """
-import argparse, json, os, re, subprocess, sys, tempfile, time
+import argparse, json, os, re, shlex, subprocess, sys, tempfile, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP, FAKE = "com.patrickreynolds.mpeinstruments", "com.patrickreynolds.fakeseaboard"
@@ -34,7 +34,8 @@ def adb(*a, check_rc=True):
     if check_rc and r.returncode != 0: raise RuntimeError(f"adb {' '.join(a)}: {r.stderr.strip()}")
     return r.stdout
 
-def app_cmd(action, *extras): adb("shell", "am", "broadcast", "-n", f"{APP}/.DebugReceiver", "-a", action, *extras)
+# adb shell joins its arguments into one command line: quote each, so JSON (--es perf) survives.
+def app_cmd(action, *extras): adb("shell", "am", "broadcast", "-n", f"{APP}/.DebugReceiver", "-a", action, *map(shlex.quote, extras))
 def fake_cmd(action, *extras): adb("shell", "am", "broadcast", "-n", f"{FAKE}/.CommandReceiver", "-a", action, *extras)
 
 def log_since(mark, tags="mpe-test:I fakeseaboard:I mpe:I"):
@@ -197,6 +198,11 @@ for inst, note in [("strings/cello", 50), ("strings/violin", 69), ("winds/flute"
     else:
         check(f"{name}: quiet by the end", rms_between(res, 3.6, 4.0) < 0.01, f"last 0.4 s rms {rms_between(res, 3.6, 4.0)}")
 
+# Start from the default performance (one part, no arp, no effects) whatever an earlier run left.
+DEFAULT_PERF = json.dumps({"part0": {"instrument": "strings/cello", "reverb": 0}})
+app_cmd("SET", "--es", "perf", DEFAULT_PERF, "--ei", "transpose", "0")
+time.sleep(0.5)
+
 # ---- 2. the recorded session, 30 s of it, through the real MIDI stack ----------------------
 if want("session"):
     app_cmd("SET", "--es", "instrument", "strings/violin", "--ei", "transpose", "-60")   # played 5 octaves up
@@ -297,6 +303,31 @@ if want("switch"):
         check("switch: still sounding on the new instrument", res["held_rms"] > 0.003, f"rms {res['held_rms']}")
         check("switch: no clipping during the switches", res["peak"] < 0.99, f"peak {res['peak']}")
     time.sleep(1)
+
+# ---- 5b. split and arpeggiator through the real MIDI stack ---------------------------------
+if want("arp"):
+    # Left of C4: an fm-keys arpeggio, 110 bpm sixteenths (7.33 steps/s). Right: a cello note.
+    app_cmd("SET", "--es", "perf", json.dumps({"layout": 1, "splitNote": 60, "bpm": 110,
+            "part0": {"instrument": "synths/fm-keys", "arp": True, "order": 0, "rate": 4, "reverb": 0},
+            "part1": {"instrument": "strings/cello", "reverb": 0}}))
+    time.sleep(1.0)
+    s0 = int(stats().get("arpSteps", 0))
+    wav = record(4, "arp", lambda: fake_cmd("CHORD", "--es", "notes", "1:48,2:52,3:55,4:67", "--ef", "seconds", "3"))
+    st = stats()
+    steps = int(st.get("arpSteps", 0)) - s0
+    check("arp: steps at the tempo (110 bpm sixteenths, 3 s held)", 18 <= steps <= 26, f"{steps} steps, want ~22")
+    if wav:
+        res = analyze(wav)
+        check("arp + split: audible", max(res["rms_per_100ms"]) > 0.01, f"loudest 100 ms rms {max(res['rms_per_100ms']):.3f}")
+        check("arp + split: no clipping", res["peak"] < 0.99, f"peak {res['peak']}")
+    else:
+        check("arp: recording", False)
+    time.sleep(1.5)
+    st = stats()
+    after = int(st.get("arpSteps", 0)) - s0 - steps
+    check("arp: stops when the hand lifts (no latch)", after <= 1, f"{after} steps after release")
+    app_cmd("SET", "--es", "perf", DEFAULT_PERF)
+    time.sleep(0.5)
 
 # ---- 6. screen off: the foreground service must keep the audio and MIDI going -----------------
 # Some phones (Xiaomi without "USB debugging (Security settings)") refuse injected key presses.

@@ -38,17 +38,23 @@ class DebugReceiver : BroadcastReceiver() {
                     "events=${s.events} dropped=${s.dropped} panics=${s.panics} voices=${s.voices} " +
                     "ageAvgMs=${s.eventAgeAvgMs} ageMaxMs=${s.eventAgeMaxMs} outLatencyMs=${s.outputLatencyMs} " +
                     "rate=${s.sampleRate} burst=${s.burstFrames} buffer=${s.bufferFrames} xruns=${s.xruns} " +
-                    "exclusive=${s.exclusive} path=${s.pathName.replace(' ', '_')} loadAvg=${s.loadAvg} loadPeak=${s.loadPeak} restarts=${s.streamRestarts}")
+                    "exclusive=${s.exclusive} path=${s.pathName.replace(' ', '_')} loadAvg=${s.loadAvg} loadPeak=${s.loadPeak} restarts=${s.streamRestarts} " +
+                    "arpSteps=${s.arpSteps} noteCenter=${s.noteCenter}")
             }
             "SET" -> {
+                // Through AppState, so the screen and the saved settings agree with what is playing.
+                AppState.init(context)
                 intent.getStringExtra("instrument")?.let { id ->
-                    val i = Native.instruments().indexOfFirst { it.id == id }
-                    if (i >= 0) Native.nativeSetInstrument(i) else Log.w(TAG, "unknown instrument $id")
+                    if (AppState.instruments.any { it.id == id }) AppState.updatePart(0) { it.copy(instrument = id) }
+                    else Log.w(TAG, "unknown instrument $id")
                 }
                 if (intent.hasExtra("watchdog")) Native.nativeSetWatchdogMs(intent.getIntExtra("watchdog", 0))
-                if (intent.hasExtra("transpose")) Native.nativeSetTranspose(intent.getIntExtra("transpose", 0))
-                if (intent.hasExtra("volume")) Native.nativeSetVolume(intent.getFloatExtra("volume", 0.8f))
-                if (intent.hasExtra("bend")) Native.nativeSetBendRange(intent.getFloatExtra("bend", 48f))
+                if (intent.hasExtra("transpose")) AppState.changeTranspose(intent.getIntExtra("transpose", 0))
+                if (intent.hasExtra("volume")) AppState.changeVolume(intent.getFloatExtra("volume", 0.8f))
+                if (intent.hasExtra("bend")) AppState.changeBendRange(intent.getFloatExtra("bend", 48f))
+                // --es perf '<Perf json>' sets the whole performance (split, arp, effects); --es preset <name> loads one.
+                intent.getStringExtra("perf")?.let { j -> AppState.update { Perf.from(org.json.JSONObject(j)) } }
+                intent.getStringExtra("preset")?.let { n -> AppState.allPresets.firstOrNull { it.name == n }?.let { AppState.load(it) } }
                 Log.i(TAG, "SET done")
             }
             "PANIC" -> { Native.nativePanic(); Log.i(TAG, "PANIC done") }

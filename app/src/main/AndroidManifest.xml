@@ -18,7 +18,9 @@
     <application
         android:allowBackup="false"
         android:label="MPE Instruments"
-        android:theme="@android:style/Theme.DeviceDefault.DayNight">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.Mpe">
 
         <activity
             android:name=".MainActivity"

@@ -5,6 +5,8 @@
 #include "faust/dsp/dsp.h"
 #include "faust/gui/MapUI.h"
 
+dsp* mpe_create_fx_reverb();            // generated from fx/reverb.dsp
+
 namespace mpe {
 
 static const int kChannels = 16;      // MPE: channel 0 is the master, 1..15 carry notes
@@ -89,8 +91,28 @@ struct Engine::Part {
 static float smoothTo(float cur, float target, float coef) { return cur + (target - cur) * coef; }
 static float noteToHz(float note) { return 440.f * std::pow(2.f, (note - 69.f) / 12.f); }
 
+// Master effects (a Faust reverb and a delay) and each part's tone and drive.
+struct Engine::Fx {
+    dsp* reverb = nullptr;
+    MapUI ui;
+    FAUSTFLOAT *size = nullptr, *damp = nullptr;
+    int reverbQuiet = 0;                       // samples since the reverb went silent
+    std::vector<float> dl, dr;                 // delay lines
+    int pos = 0;
+    float time = -1, lpL = 0, lpR = 0;         // delay time in frames (smoothed), feedback low-pass
+    float tone[2][4] = {};                     // per part: two one-pole stages, left and right
+    explicit Fx(int sr) : dl(size_t(sr) * 5 / 2), dr(size_t(sr) * 5 / 2) {
+        reverb = mpe_create_fx_reverb();
+        reverb->init(sr);
+        reverb->buildUserInterface(&ui);
+        size = ui.getParamZone("size");
+        damp = ui.getParamZone("damp");
+    }
+    ~Fx() { delete reverb; }
+};
+
 Engine::Engine(int sampleRate)
-    : sr_(sampleRate), ch_(new Channel[kChannels]), parts_(new Part[2]),
+    : sr_(sampleRate), ch_(new Channel[kChannels]), parts_(new Part[2]), fx_(new Fx(sampleRate)),
       pubVoices_(new PubVoice[2 * kChannels]), pubFingers_(new PubFinger[kChannels]) {}
 
 Engine::~Engine() {
@@ -350,7 +372,8 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
 
         if (sl.freq) *sl.freq = v.freq;
         if (sl.gate) *sl.gate = v.gate ? 1.f : 0.f;
-        if (sl.pressure) *sl.pressure = v.pressureS;
+        const float curve = perf_.part[p].pressureCurve;
+        if (sl.pressure) *sl.pressure = curve == 1.f ? v.pressureS : std::pow(v.pressureS, std::min(std::max(curve, 0.2f), 4.f));
         if (sl.slide) *sl.slide = v.slideS;
         if (sl.velocity) *sl.velocity = std::min(1.f, v.velocity * velScale);
 
@@ -373,6 +396,69 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
         if (!v.gate) v.quietSamples = (v.level < 3e-5f) ? v.quietSamples + n : 0;
         if (!v.gate && v.quietSamples > quietLimit) v.sounding = false;     // fully decayed
     }
+}
+
+// A part's tone (12 dB/octave low-pass, 300 Hz .. open) and drive.
+void Engine::partFx(int p, float* l, float* r, int n) {
+    const PartConfig& c = perf_.part[p];
+    if (c.brightness < 0.999f) {
+        const float fc = 300.f * std::pow(2.f, std::max(0.f, c.brightness) * 6.f);   // 300 Hz .. 19 kHz
+        const float a = 1.f - std::exp(-2.f * float(M_PI) * fc / sr_);
+        float* st = fx_->tone[p];
+        for (int i = 0; i < n; i++) {
+            st[0] += (l[i] - st[0]) * a; st[1] += (st[0] - st[1]) * a; l[i] = st[1];
+            st[2] += (r[i] - st[2]) * a; st[3] += (st[2] - st[3]) * a; r[i] = st[3];
+        }
+    }
+    if (c.drive > 0.001f) {
+        const float k = 1.f + c.drive * 8.f, makeup = 1.f / std::sqrt(k);
+        for (int i = 0; i < n; i++) { l[i] = std::tanh(l[i] * k) * makeup; r[i] = std::tanh(r[i] * k) * makeup; }
+    }
+}
+
+// The delay (tempo-synced, optionally ping-pong) and the reverb, added to the mix.
+void Engine::masterFx(float* mixL, float* mixR, const float* revL, const float* revR,
+                      const float* delL, const float* delR, int n) {
+    Fx& fx = *fx_;
+    const int len = int(fx.dl.size());
+    const float target = std::min(std::max(perf_.delayBeats * 60.f / std::max(20.f, perf_.bpm) * sr_, 1.f), float(len - 2));
+    if (fx.time < 0) fx.time = target;
+    const float fb = std::min(std::max(perf_.delayFeedback, 0.f), 0.95f);
+    const float lpA = 1.f - std::exp(-2.f * float(M_PI) * 5000.f / sr_);     // darker repeats
+    for (int i = 0; i < n; i++) {
+        fx.time += (target - fx.time) * 0.0005f;                              // ~40 ms glide when the tempo changes
+        float rp = fx.pos - fx.time;
+        if (rp < 0) rp += len;
+        const int i0 = int(rp), i1 = (i0 + 1) % len;
+        const float fr = rp - i0;
+        const float yl = fx.dl[i0] + (fx.dl[i1] - fx.dl[i0]) * fr;
+        const float yr = fx.dr[i0] + (fx.dr[i1] - fx.dr[i0]) * fr;
+        fx.lpL += (yl - fx.lpL) * lpA;
+        fx.lpR += (yr - fx.lpR) * lpA;
+        if (perf_.delayPingPong) {                                            // in on the left, bouncing across
+            fx.dl[fx.pos] = (delL[i] + delR[i]) * 0.5f + fx.lpR * fb;
+            fx.dr[fx.pos] = fx.lpL * fb;
+        } else {
+            fx.dl[fx.pos] = delL[i] + fx.lpL * fb;
+            fx.dr[fx.pos] = delR[i] + fx.lpR * fb;
+        }
+        fx.pos = (fx.pos + 1) % len;
+        mixL[i] += yl;
+        mixR[i] += yr;
+    }
+
+    bool send = false;
+    for (int p = 0; p < 2; p++) send = send || perf_.part[p].reverb > 0;
+    if (!send && fx.reverbQuiet > 8 * sr_) return;                           // off, and its tail has died away
+    if (fx.size) *fx.size = perf_.reverbSize;
+    if (fx.damp) *fx.damp = perf_.reverbDamp;
+    float wl[kMaxBlock], wr[kMaxBlock];
+    float* ins[2] = { const_cast<float*>(revL), const_cast<float*>(revR) };
+    float* outs[2] = { wl, wr };
+    fx.reverb->compute(n, ins, outs);
+    float e = 0;
+    for (int i = 0; i < n; i++) { mixL[i] += wl[i]; mixR[i] += wr[i]; e += wl[i] * wl[i] + wr[i] * wr[i]; }
+    fx.reverbQuiet = e < 1e-9f * n ? fx.reverbQuiet + n : 0;
 }
 
 void Engine::publish() {
@@ -468,7 +554,8 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
     }
 
     const float vol = volume_.load();
-    float mixL[kMaxBlock], mixR[kMaxBlock];
+    float mixL[kMaxBlock], mixR[kMaxBlock], partL[kMaxBlock], partR[kMaxBlock];
+    float revL[kMaxBlock], revR[kMaxBlock], delL[kMaxBlock], delR[kMaxBlock];
     int done = 0;
     while (done < frames) {
         const int64_t now = frameCounter_ + done;
@@ -496,14 +583,28 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
 
         std::fill(mixL, mixL + n, 0.f);
         std::fill(mixR, mixR + n, 0.f);
+        std::fill(revL, revL + n, 0.f);
+        std::fill(revR, revR + n, 0.f);
+        std::fill(delL, delL + n, 0.f);
+        std::fill(delR, delR + n, 0.f);
         for (int p = 0; p < 2; p++) {
             if (p == 1 && perf_.layout == Layout::Single) {          // part 1 off: let its notes ring out
                 bool any = false;
                 for (int i = 1; i < kChannels; i++) any = any || parts_[1].v[i].sounding;
                 if (!any) continue;
             }
-            renderVoices(p, mixL, mixR, n, dt);
+            std::fill(partL, partL + n, 0.f);
+            std::fill(partR, partR + n, 0.f);
+            renderVoices(p, partL, partR, n, dt);
+            partFx(p, partL, partR, n);
+            const float rs = perf_.part[p].reverb, ds = perf_.part[p].delay;
+            for (int i = 0; i < n; i++) {
+                mixL[i] += partL[i]; mixR[i] += partR[i];
+                revL[i] += partL[i] * rs; revR[i] += partR[i] * rs;
+                delL[i] += partL[i] * ds; delR[i] += partR[i] * ds;
+            }
         }
+        masterFx(mixL, mixR, revL, revR, delL, delR, n);
         for (int i = 0; i < n; i++) {                                // soft limiter
             out[2 * (done + i)] = std::tanh(mixL[i] * vol * 1.5f) * 0.7f;
             out[2 * (done + i) + 1] = std::tanh(mixR[i] * vol * 1.5f) * 0.7f;

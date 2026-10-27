@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 // Release signing key: kept outside the repo. MPE_SIGNING names a properties file with storeFile,
@@ -38,10 +39,12 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("release")
+            isMinifyEnabled = true                         // Compose is large unshrunk
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
-    buildFeatures { prefab = true }          // Oboe ships as a prefab package
+    buildFeatures { prefab = true; compose = true; buildConfig = true }          // Oboe ships as a prefab package
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -51,4 +54,9 @@ android {
 
 dependencies {
     implementation("com.google.oboe:oboe:1.10.0")
+    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material:material-icons-core")
 }

@@ -12,6 +12,7 @@ import android.util.Log
  *   adb shell am broadcast -n com.patrickreynolds.fakeseaboard/.CommandReceiver -a PLAY --es file seaboard-session.mid --ef speed 1
  *   ... -a NOTE --ei channel 1 --ei note 57 --ef seconds 2 --ef vibrato 0
  *   ... -a HOLD --ei channel 1 --ei note 57      (note on that is never released by the device)
+ *   ... -a CHORD --es notes 1:48,2:52,3:55 --ef seconds 3     (several fingers at once)
  *   ... -a STOP            stop and lift every finger
  *   ... -a SILENCE         stop mid-note with no note-off (a dropped Bluetooth link)
  *   ... -a UNPLUG / PLUG   remove / add the device, like pulling the USB cable
@@ -37,6 +38,15 @@ class CommandReceiver : BroadcastReceiver() {
                                intent.getFloatExtra("vibrato", 0f).toDouble(),
                                holdForever = intent.action == "HOLD"),
                 1.0, "${intent.action} ${intent.getIntExtra("note", 57)}")
+            "CHORD" -> {
+                // --es notes 1:48,2:52,3:55  one finger per channel, all for --ef seconds, merged into one timeline
+                val fingers = (intent.getStringExtra("notes") ?: "1:48,2:52,3:55").split(",").map { it.split(":") }
+                val seconds = intent.getFloatExtra("seconds", 2f).toDouble()
+                val vibrato = intent.getFloatExtra("vibrato", 0f).toDouble()
+                val timeline = fingers.flatMap { (ch, note) -> Player.gesture(ch.trim().toInt(), note.trim().toInt(), seconds, vibrato, false) }
+                    .sortedBy { it.seconds }
+                Player.play(timeline, 1.0, "CHORD ${fingers.size} notes")
+            }
             "STOP" -> Player.stop(releaseNotes = true)
             "SILENCE" -> Player.stop(releaseNotes = false)
             "UNPLUG", "PLUG" -> {

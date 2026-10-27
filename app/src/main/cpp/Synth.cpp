@@ -90,9 +90,11 @@ bool Synth::open() {
     eng->setTranspose(transpose_);
     eng->setBendRange(bendRange_);
     eng->setWatchdogMs(watchdogMs_);
-    eng->setInstrument(instrument_);
+    eng->setInstrument(0, instrument_[0]);
+    if (instrument_[1] >= 0) eng->setInstrument(1, instrument_[1]);
     {
         std::lock_guard<std::mutex> g(mu_);
+        eng->setPerformance(perf_);
         stream_ = s;
         engine_ = eng;
     }
@@ -277,10 +279,18 @@ void Synth::detachMidi() {
     LOGI("MIDI detached");
 }
 
-void Synth::setInstrument(int index) {
-    instrument_ = index;
-    if (auto e = engine()) { e->setInstrument(index); }
+void Synth::setInstrument(int part, int index) {
+    if (part < 0 || part > 1) return;
+    instrument_[part] = index;
+    if (auto e = engine()) { e->setInstrument(part, index); }
 }
+void Synth::setPerformance(const mpe::Performance& p) {
+    std::lock_guard<std::mutex> g(mu_);
+    perf_ = p;
+    if (engine_) engine_->setPerformance(p);
+}
+int Synth::voices(mpe::VoiceView* out, int max) { auto e = engine(); return e ? e->voices(out, max) : 0; }
+int Synth::fingers(mpe::FingerView* out, int max) { auto e = engine(); return e ? e->fingers(out, max) : 0; }
 void Synth::setVolume(float v) { volume_ = v; if (auto e = engine()) e->setVolume(v); }
 void Synth::setTranspose(int s) { transpose_ = s; if (auto e = engine()) e->setTranspose(s); }
 void Synth::setBendRange(float s) { bendRange_ = s; if (auto e = engine()) e->setBendRange(s); }
@@ -298,6 +308,8 @@ void Synth::fillStats(double o[kStatCount]) {
         o[5] = engine_->activeVoices();
         o[6] = (double)st.events; o[7] = (double)st.dropped; o[8] = (double)st.panics;
         o[9] = engine_->sampleRate();
+        o[19] = st.noteCenter;
+        o[20] = (double)st.arpSteps;
     }
     if (stream_) {
         oboe::AudioStream* s = stream_.get();
