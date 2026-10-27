@@ -276,7 +276,41 @@ if want("audioserver"):
             res = analyze(wav, midi_hz(50), 0.8, 1.8)
             check("audioserver killed: plays in tune afterwards", res["cents_off"] is not None and abs(res["cents_off"]) <= 30, f"{res['cents_off']} cents")
 
-# ---- 8. app killed and started again ------------------------------------------------------------
+# ---- 8. stress: dense playing while the cable is pulled and instruments change -------------------
+if want("stress"):
+    pid0 = adb("shell", "pidof", APP, check_rc=False).strip()
+    app_cmd("SET", "--ei", "transpose", "-60", "--ei", "watchdog", "0")
+    insts = ["strings/cello", "winds/flute", "synths/pad", "plucked/nylon-guitar", "voices/tenor", "struck/marimba"]
+    fake_cmd("PLAY", "--es", "file", "seaboard-session.mid", "--ef", "speed", "2", "--ef", "seconds", "60")
+    for i in range(8):
+        for k in range(4):
+            app_cmd("SET", "--es", "instrument", insts[(i * 4 + k) % len(insts)])
+            time.sleep(0.15)
+        fake_cmd("UNPLUG")
+        time.sleep(0.4)
+        fake_cmd("PLUG")
+        time.sleep(1.2)
+        # unplugging stops the player; start it again so the next cycle is played into
+        fake_cmd("PLAY", "--es", "file", "seaboard-session.mid", "--ef", "speed", "2", "--ef", "seconds", "60")
+    fake_cmd("STOP")
+    end = time.time() + 10
+    while time.time() < end and stats().get("midiState") != "1": time.sleep(0.5)
+    pid1 = adb("shell", "pidof", APP, check_rc=False).strip()
+    st = stats()
+    check("stress: the app survived 8 unplug/replug cycles and 32 instrument switches", pid1 == pid0 and pid0 != "", f"pid {pid0} -> {pid1}")
+    check("stress: connected again at the end", st.get("midiState") == "1", f'connected="{st.get("connected")}"')
+    app_cmd("SET", "--es", "instrument", "strings/cello", "--ei", "transpose", "0")
+    time.sleep(4)                                     # anything still ringing dies away
+    wav = record(2, "afterstress", lambda: None)
+    if wav:
+        res = analyze(wav)
+        check("stress: silence afterwards (no stuck note)", res["peak"] < 0.01, f"peak {res['peak']}")
+    wav = record(3, "afterstress2", lambda: fake_cmd("NOTE", "--ei", "channel", "1", "--ei", "note", "50", "--ef", "seconds", "1.5"))
+    if wav:
+        res = analyze(wav, midi_hz(50), 0.6, 1.4)
+        check("stress: still plays in tune", res["cents_off"] is not None and abs(res["cents_off"]) <= 30, f"{res['cents_off']} cents")
+
+# ---- 9. app killed and started again ------------------------------------------------------------
 if want("restart"):
     adb("shell", "am", "force-stop", APP)
     time.sleep(1)
