@@ -251,7 +251,32 @@ if want("screen"):
     adb("shell", "wm", "dismiss-keyguard", check_rc=False)
     time.sleep(1)
 
-# ---- 7. app killed and started again ------------------------------------------------------------
+# ---- 7. the audio server dies (what a route change or a media crash does): recover, no crash ---
+if want("audioserver"):
+    rooted = "root" in adb("root", check_rc=False) or adb("shell", "id", check_rc=False).startswith("uid=0")
+    if rooted:
+        time.sleep(3)
+        adb("wait-for-device")
+    if not rooted or not adb("shell", "pidof", "audioserver", check_rc=False).strip():
+        print("SKIP  audioserver: needs a rooted emulator (adb root)")
+    else:
+        pid0 = adb("shell", "pidof", APP, check_rc=False).strip()
+        r0 = int(stats().get("restarts", 0))
+        adb("shell", "kill", adb("shell", "pidof", "audioserver").strip())
+        time.sleep(7)
+        pid1 = adb("shell", "pidof", APP, check_rc=False).strip()
+        st = stats()
+        check("audioserver killed: the app survives", pid1 == pid0 and pid0 != "", f"pid {pid0} -> {pid1}")
+        check("audioserver killed: the stream is reopened", int(st.get("restarts", 0)) > r0, f"restarts {r0} -> {st.get('restarts')}")
+        check("audioserver killed: latency readout is sane again", 0 < float(st.get("outLatencyMs", -1)) < 1000, f"{st.get('outLatencyMs')} ms")
+        check("audioserver killed: still connected to the Seaboard", st.get("midiState") == "1")
+        app_cmd("SET", "--es", "instrument", "strings/cello")
+        wav = record(4, "afterserver", lambda: fake_cmd("NOTE", "--ei", "channel", "8", "--ei", "note", "50", "--ef", "seconds", "2"))
+        if wav:
+            res = analyze(wav, midi_hz(50), 0.8, 1.8)
+            check("audioserver killed: plays in tune afterwards", res["cents_off"] is not None and abs(res["cents_off"]) <= 30, f"{res['cents_off']} cents")
+
+# ---- 8. app killed and started again ------------------------------------------------------------
 if want("restart"):
     adb("shell", "am", "force-stop", APP)
     time.sleep(1)

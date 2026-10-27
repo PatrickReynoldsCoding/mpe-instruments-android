@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 #include <amidi/AMidi.h>
 #include <oboe/Oboe.h>
@@ -41,7 +42,7 @@ public:
     void resetLatencyTuner() { if (tuner_) tuner_->requestReset(); }
 
     // Everything the status line shows. Order is fixed: see Stats.kt.
-    static constexpr int kStatCount = 18;
+    static constexpr int kStatCount = 19;
     void fillStats(double out[kStatCount]);
 
     // Debug: record what the audio callback produced, so tests can check the real output.
@@ -54,6 +55,8 @@ public:
 
 private:
     bool open();
+    void restartStream(const char* why);
+    void healthLoop();
     void pollMidi(int64_t nowNs);
     std::shared_ptr<mpe::Engine> engine() { std::lock_guard<std::mutex> g(mu_); return engine_; }
 
@@ -64,6 +67,10 @@ private:
     std::unique_ptr<mpe::MidiInput> midi_;          // used only on the audio thread
     std::unique_ptr<oboe::LatencyTuner> tuner_;
     std::atomic<bool> running_{false};
+    std::mutex restartMu_;                          // one stream restart at a time
+    std::thread health_;
+    std::atomic<bool> healthRun_{false};
+    std::atomic<int> restarts_{0};
 
     // MIDI port, shared between the control thread (attach/detach) and the audio thread (poll).
     AMidiDevice* device_ = nullptr;

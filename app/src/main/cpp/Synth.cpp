@@ -8,7 +8,12 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 
-Synth::~Synth() { stop(); detachMidi(); }
+Synth::~Synth() {
+    healthRun_ = false;
+    if (health_.joinable()) health_.join();
+    stop();
+    detachMidi();
+}
 
 bool Synth::open() {
     oboe::AudioStreamBuilder b;
@@ -54,21 +59,53 @@ bool Synth::open() {
 bool Synth::start() {
     if (running_) return true;
     if (!open()) return false;
-    oboe::Result r = stream_->requestStart();
+    oboe::Result r;
+    {
+        std::lock_guard<std::mutex> g(mu_);
+        r = stream_ ? stream_->requestStart() : oboe::Result::ErrorClosed;
+    }
     if (r != oboe::Result::OK) { LOGW("requestStart failed: %s", oboe::convertToText(r)); return false; }
     running_ = true;
+    if (!healthRun_.exchange(true)) health_ = std::thread(&Synth::healthLoop, this);
     return true;
+}
+
+// Close and reopen the stream, keeping the settings and the MIDI port.
+void Synth::restartStream(const char* why) {
+    std::lock_guard<std::mutex> r(restartMu_);
+    LOGW("restarting audio stream: %s", why);
+    stop();
+    start();
+    restarts_++;
+}
+
+// A stream can keep calling back yet be broken: after the audio server restarts, the legacy
+// (non-MMAP) path reconnects by itself but its timestamps are left seconds off, which also
+// makes the latency readout wrong. If the stream reports an impossible latency twice in a
+// row, reopen it.
+void Synth::healthLoop() {
+    int bad = 0;
+    while (healthRun_) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (!running_) { bad = 0; continue; }
+        bool impossible = false;
+        {
+            std::lock_guard<std::mutex> g(mu_);
+            if (!stream_) continue;
+            auto lat = stream_->calculateLatencyMillis();
+            impossible = lat && lat.value() > 1000.0;
+        }
+        bad = impossible ? bad + 1 : 0;
+        if (bad >= 2) { restartStream("output latency is impossible (timestamps broken)"); bad = 0; }
+    }
 }
 
 void Synth::stop() {
     running_ = false;
-    std::shared_ptr<oboe::AudioStream> s;
-    {
-        std::lock_guard<std::mutex> g(mu_);
-        s = stream_;
-    }
-    if (s) { s->requestStop(); s->close(); }
+    // Close under mu_: other threads only touch the stream while holding mu_, so nobody can be
+    // inside getTimestamp() or getXRunCount() on a stream that is being closed (that crashes).
     std::lock_guard<std::mutex> g(mu_);
+    if (stream_) { stream_->requestStop(); stream_->close(); }
     stream_.reset();
     audioEngine_ = nullptr;
 }
@@ -83,7 +120,9 @@ void Synth::onErrorAfterClose(oboe::AudioStream*, oboe::Result error) {
         audioEngine_ = nullptr;
     }
     running_ = false;
+    std::lock_guard<std::mutex> r(restartMu_);
     start();
+    restarts_++;
 }
 
 oboe::DataCallbackResult Synth::onAudioReady(oboe::AudioStream* stream, void* data, int32_t frames) {
@@ -168,18 +207,17 @@ void Synth::panic() { if (auto e = engine()) e->panic(); }
 // Order must match Stats.kt.
 void Synth::fillStats(double o[kStatCount]) {
     std::memset(o, 0, sizeof(double) * kStatCount);
-    std::shared_ptr<oboe::AudioStream> s;
-    std::shared_ptr<mpe::Engine> e;
-    { std::lock_guard<std::mutex> g(mu_); s = stream_; e = engine_; }
-    if (e) {
-        mpe::Stats st = e->stats();
+    std::lock_guard<std::mutex> g(mu_);              // the stream cannot be closed while we read it
+    if (engine_) {
+        mpe::Stats st = engine_->stats();
         o[0] = st.eventAgeAvgMs; o[1] = st.eventAgeMaxMs; o[2] = st.eventAgeLastMs;
         o[3] = st.loadAvg; o[4] = st.loadPeak;
-        o[5] = e->activeVoices();
+        o[5] = engine_->activeVoices();
         o[6] = (double)st.events; o[7] = (double)st.dropped; o[8] = (double)st.panics;
-        o[9] = e->sampleRate();
+        o[9] = engine_->sampleRate();
     }
-    if (s) {
+    if (stream_) {
+        oboe::AudioStream* s = stream_.get();
         auto lat = s->calculateLatencyMillis();               // buffer + hardware, from the stream's own timestamps
         o[10] = lat ? lat.value() : -1;
         o[11] = s->getBufferSizeInFrames();
@@ -187,10 +225,11 @@ void Synth::fillStats(double o[kStatCount]) {
         auto x = s->getXRunCount();
         o[13] = x ? x.value() : -1;
         o[14] = s->getSharingMode() == oboe::SharingMode::Exclusive ? 1 : 0;
-        o[15] = s->usesAAudio() ? (oboe::OboeExtensions::isMMapUsed(s.get()) ? 2 : 1) : 0;   // 0 OpenSL, 1 AAudio, 2 AAudio+MMAP
+        o[15] = s->usesAAudio() ? (oboe::OboeExtensions::isMMapUsed(s) ? 2 : 1) : 0;   // 0 OpenSL, 1 AAudio, 2 AAudio+MMAP
     }
     o[16] = (double)midiBytes_.load();
     o[17] = port_.load() ? (portBroken_.load() ? -1 : 1) : 0;
+    o[18] = restarts_.load();
 }
 
 bool Synth::captureStart(double seconds) {

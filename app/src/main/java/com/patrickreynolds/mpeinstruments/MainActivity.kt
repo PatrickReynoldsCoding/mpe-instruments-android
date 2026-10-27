@@ -216,7 +216,7 @@ class MainActivity : Activity() {
             appendLine("audio path        ${s.pathName}${if (s.exclusive) ", exclusive" else ", shared"}")
             appendLine("sample rate       ${s.sampleRate} Hz")
             appendLine("burst / buffer    ${s.burstFrames} / ${s.bufferFrames} frames  (${ms(1000.0 * s.bufferFrames / s.sampleRate.coerceAtLeast(1))} ms)")
-            appendLine("underruns         ${s.xruns}")
+            appendLine("underruns         ${s.xruns}   stream restarts ${s.streamRestarts}")
             appendLine()
             val played = s.events > 0                // no MIDI yet: the MIDI half is unknown, not zero
             appendLine("MIDI -> synth     avg ${if (played) ms(s.eventAgeAvgMs) else "  n/a"} ms   max ${if (played) ms(s.eventAgeMaxMs) else "  n/a"} ms")

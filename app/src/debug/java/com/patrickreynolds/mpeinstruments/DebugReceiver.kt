@@ -37,7 +37,7 @@ class DebugReceiver : BroadcastReceiver() {
                     "events=${s.events} dropped=${s.dropped} panics=${s.panics} voices=${s.voices} " +
                     "ageAvgMs=${s.eventAgeAvgMs} ageMaxMs=${s.eventAgeMaxMs} outLatencyMs=${s.outputLatencyMs} " +
                     "rate=${s.sampleRate} burst=${s.burstFrames} buffer=${s.bufferFrames} xruns=${s.xruns} " +
-                    "exclusive=${s.exclusive} path=${s.pathName.replace(' ', '_')} loadAvg=${s.loadAvg} loadPeak=${s.loadPeak}")
+                    "exclusive=${s.exclusive} path=${s.pathName.replace(' ', '_')} loadAvg=${s.loadAvg} loadPeak=${s.loadPeak} restarts=${s.streamRestarts}")
             }
             "SET" -> {
                 intent.getStringExtra("instrument")?.let { id ->
