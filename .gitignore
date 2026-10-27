@@ -5,3 +5,5 @@ local.properties
 .idea/
 /app/captures/
 build-*/
+.cxx/
+.kotlin/

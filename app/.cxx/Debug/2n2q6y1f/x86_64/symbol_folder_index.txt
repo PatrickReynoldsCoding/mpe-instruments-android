@@ -1,1 +1,0 @@
-/home/patrick-reynolds/repos/mpe-instruments-android/app/build/intermediates/cxx/Debug/2n2q6y1f/obj/x86_64

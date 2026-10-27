@@ -1,6 +1,0 @@
-/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/CMakeFiles/mpeandroid.dir
-/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/CMakeFiles/edit_cache.dir
-/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/CMakeFiles/rebuild_cache.dir
-/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/CMakeFiles/mpe_engine.dir
-/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/CMakeFiles/edit_cache.dir
-/home/patrick-reynolds/repos/mpe-instruments-android/app/.cxx/Debug/2n2q6y1f/x86_64/engine/CMakeFiles/rebuild_cache.dir

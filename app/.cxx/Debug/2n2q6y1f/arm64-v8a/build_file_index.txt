@@ -1,2 +1,0 @@
-/home/patrick-reynolds/repos/mpe-instruments-android/app/src/main/cpp/CMakeLists.txt
-/home/patrick-reynolds/repos/mpe-instruments-android/engine/CMakeLists.txt
