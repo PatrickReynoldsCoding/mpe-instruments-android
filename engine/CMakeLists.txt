@@ -7,6 +7,13 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+set(MPE_SANITIZE "" CACHE STRING "address, undefined or thread: build the engine and tests with that sanitizer")
+if(MPE_SANITIZE)
+  add_compile_options(-fsanitize=${MPE_SANITIZE} -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=${MPE_SANITIZE})
+endif()
+
+
 # Where the instruments come from: the faust-mpe-instruments submodule.
 set(MPE_INSTRUMENTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/mpe-instruments"
     CACHE PATH "checkout of faust-mpe-instruments")
