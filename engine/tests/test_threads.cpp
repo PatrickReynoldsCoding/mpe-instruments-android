@@ -31,6 +31,18 @@ int main() {
             r.engine.setVolume(0.5f + 0.1f * (i % 4));
             r.engine.setTranspose(i % 3 - 1);
             if (i % 10 == 0) r.engine.setInstrument(i / 10 % n);
+            if (i % 10 == 5) r.engine.setInstrument(1, (i / 10 + 3) % n);
+            if (i % 7 == 0) {                               // split, layer and the arp, toggled while playing
+                mpe::Performance p;
+                p.layout = mpe::Layout(i / 7 % 3);
+                p.part[0].arp = i / 7 % 2;
+                p.part[1].arp = i / 14 % 2;
+                p.part[0].latch = i / 21 % 2;
+                p.scaleMask = (i / 7 % 4) ? 0b101010110101 : 0;
+                p.assist = 0.7f;
+                r.engine.setPerformance(p);
+            }
+            if (i % 3 == 0) { mpe::VoiceView v[32]; mpe::FingerView f[16]; r.engine.voices(v, 32); r.engine.fingers(f, 16); }
             r.engine.collectRetired();
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }

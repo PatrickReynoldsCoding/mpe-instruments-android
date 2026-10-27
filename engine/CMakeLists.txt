@@ -77,6 +77,11 @@ add_library(mpe_engine STATIC src/clean.cpp src/engine.cpp "${GEN_DIR}/registry.
 target_include_directories(mpe_engine PUBLIC include)
 target_include_directories(mpe_engine SYSTEM PUBLIC "${FAUST_INCLUDE_DIR}")
 target_compile_options(mpe_engine PRIVATE -Wall -Wextra)
+# DSP is always optimised, also in an Android debug build (which is -O0 otherwise: the
+# instruments then take several times the CPU and the phone numbers mean nothing).
+if(NOT MPE_SANITIZE)
+  target_compile_options(mpe_engine PRIVATE -O3)
+endif()
 
 option(MPE_BUILD_TESTS "build the tests and tools" ON)
 if(MPE_BUILD_TESTS)

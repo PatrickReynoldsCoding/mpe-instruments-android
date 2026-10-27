@@ -1,6 +1,16 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// Release signing key: kept outside the repo. MPE_SIGNING names a properties file with storeFile,
+// storePassword, keyAlias, keyPassword; default ~/.android-keys/mpe-instruments.properties.
+// Without one the release APK is built unsigned.
+val signingProps = Properties().apply {
+    val f = file(System.getenv("MPE_SIGNING") ?: "${System.getProperty("user.home")}/.android-keys/mpe-instruments.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -12,10 +22,23 @@ android {
         applicationId = "com.patrickreynolds.mpeinstruments"
         minSdk = 31          // Android 12: AMidi (29) and the Bluetooth permission model (31)
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.2.0"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }   // phone, and the emulator
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
+    }
+    signingConfigs {
+        if (signingProps.isNotEmpty()) create("release") {
+            storeFile = file(signingProps.getProperty("storeFile"))
+            storePassword = signingProps.getProperty("storePassword")
+            keyAlias = signingProps.getProperty("keyAlias")
+            keyPassword = signingProps.getProperty("keyPassword")
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.findByName("release")
+        }
     }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     buildFeatures { prefab = true }          // Oboe ships as a prefab package

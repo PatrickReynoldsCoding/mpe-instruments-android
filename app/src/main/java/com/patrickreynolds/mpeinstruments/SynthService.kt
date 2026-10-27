@@ -14,6 +14,7 @@ class SynthService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) { stop(this); return START_NOT_STICKY }
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Playing", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
@@ -23,6 +24,9 @@ class SynthService : Service() {
             .setContentText("Ready to play")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(open)
+            .addAction(Notification.Action.Builder(null, "Stop",
+                PendingIntent.getService(this, 1, Intent(this, SynthService::class.java).setAction(ACTION_STOP),
+                                         PendingIntent.FLAG_IMMUTABLE)).build())
             .setOngoing(true)
             .build()
         startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
@@ -32,10 +36,22 @@ class SynthService : Service() {
     }
 
     override fun onDestroy() {
-        MidiConnector.release()
+        MidiConnector.shutdown()
         Native.nativeStop()
         super.onDestroy()
     }
 
-    companion object { private const val CHANNEL = "playing" }
+    companion object {
+        private const val CHANNEL = "playing"
+        private const val ACTION_STOP = "com.patrickreynolds.mpeinstruments.STOP"
+        /** Called when the user stops the app; the screen listens to close itself. */
+        var onStopped: (() -> Unit)? = null
+
+        /** Everything off: no sound engine, no controller, no Bluetooth search, until the app is opened again. */
+        fun stop(service: Service) {
+            service.stopForeground(STOP_FOREGROUND_REMOVE)
+            service.stopSelf()
+            onStopped?.invoke()
+        }
+    }
 }

@@ -28,7 +28,7 @@ struct Rig {
     void noteOn(int ch, int note, int vel) { send(0x90 | ch, note, vel); }
     void noteOff(int ch, int note) { send(0x80 | ch, note, 0); }
     void bend(int ch, int v14) { send(0xE0 | ch, v14 & 127, (v14 >> 7) & 127); }   // v14: 0..16383
-    void press(int ch, int v) { send(0xD0 | ch, v, 0); }
+    void press(int ch, int v) { uint8_t b[2] = {uint8_t(0xD0 | ch), uint8_t(v)}; in.feed(b, 2, clockNs); }   // 2 bytes: a 3rd would be read as another pressure
     void slide(int ch, int v) { send(0xB0 | ch, 74, v); }
     // Renders `seconds` of audio in callbacks of `block` frames, returns the left-channel mono.
     std::vector<float> run(double seconds, int block = 128) {

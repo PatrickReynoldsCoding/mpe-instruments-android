@@ -50,6 +50,18 @@ object MidiConnector {
         Native.nativeSetWatchdogMs(if (v >= 0) v else if (currentIsBle) AUTO_BLE_WATCHDOG_MS else 0)
     }
 
+    /**
+     * Look for the last Bluetooth controller whenever none is connected, also with the app in
+     * the background. On by default: it is what makes the Seaboard play the moment it is on.
+     */
+    var autoBluetooth: Boolean
+        get() = appContext.getSharedPreferences("mpe", Context.MODE_PRIVATE).getBoolean("auto_ble", true)
+        set(v) {
+            appContext.getSharedPreferences("mpe", Context.MODE_PRIVATE).edit().putBoolean("auto_ble", v).apply()
+            if (v) startBleReconnect() else stopBleReconnect()
+            onChange?.invoke()
+        }
+
     /** MidiDeviceInfo.id of the connected device, -1 when none. */
     val connectedId get() = currentId
 
@@ -65,30 +77,42 @@ object MidiConnector {
         appContext = context.applicationContext
         manager = appContext.getSystemService(Context.MIDI_SERVICE) as MidiManager
         applyWatchdog()
-        manager.registerDeviceCallback(object : MidiManager.DeviceCallback() {
-            override fun onDeviceAdded(info: MidiDeviceInfo) {
-                // A Bluetooth device only appears here because something just opened it (we did, in
-                // connectBluetooth): opening it again would race that and replace it.
-                if (current == null && pendingId == -1 && info.type != MidiDeviceInfo.TYPE_BLUETOOTH &&
-                    info.outputPortCount > 0 && looksLikeController(info)) connect(info)
-                onChange?.invoke()
-            }
-            override fun onDeviceRemoved(info: MidiDeviceInfo) {
-                // Removed while we were still opening it (a USB device that resets re-appears with a
-                // new id): drop that open, so a fresh one of the new device can start.
-                if (info.id == pendingId) pendingId = -1
-                if (info.id == currentId) {
-                    val wasBle = currentIsBle
-                    detach()
-                    if (wasBle) startBleReconnect()          // the link dropped; the user did not ask to disconnect
-                }
-                onChange?.invoke()
-            }
-        }, handler)
+        manager.registerDeviceCallback(deviceCallback, handler)
         // A controller that is already plugged in, else the Bluetooth one used last time.
         val plugged = devices().firstOrNull { it.type != MidiDeviceInfo.TYPE_BLUETOOTH && looksLikeController(it) }
         if (plugged != null) connect(plugged) else startBleReconnect()
         handler.postDelayed(portCheck, 1000)
+    }
+
+    /** Stop everything (the user pressed Stop): close the device, stop looking, forget nothing. */
+    fun shutdown() {
+        if (!started) return
+        started = false
+        handler.removeCallbacks(portCheck)
+        manager.unregisterDeviceCallback(deviceCallback)
+        stopBleReconnect()
+        detach()
+    }
+
+    private val deviceCallback = object : MidiManager.DeviceCallback() {
+        override fun onDeviceAdded(info: MidiDeviceInfo) {
+            // A Bluetooth device only appears here because something just opened it (we did, in
+            // connectBluetooth): opening it again would race that and replace it.
+            if (current == null && pendingId == -1 && info.type != MidiDeviceInfo.TYPE_BLUETOOTH &&
+                info.outputPortCount > 0 && looksLikeController(info)) connect(info)
+            onChange?.invoke()
+        }
+        override fun onDeviceRemoved(info: MidiDeviceInfo) {
+            // Removed while we were still opening it (a USB device that resets re-appears with a
+            // new id): drop that open, so a fresh one of the new device can start.
+            if (info.id == pendingId) pendingId = -1
+            if (info.id == currentId) {
+                val wasBle = currentIsBle
+                detach()
+                if (wasBle) startBleReconnect()          // the link dropped; the user did not ask to disconnect
+            }
+            onChange?.invoke()
+        }
     }
 
     // Safety net: if the native side finds the port dead (receive failed) while Android still
@@ -112,7 +136,7 @@ object MidiConnector {
     private fun startBleReconnect() {
         val address = prefs.getString("ble_address", null) ?: return
         val btName = prefs.getString("ble_bt_name", null)
-        if (reconnectScanner != null || current != null) return
+        if (reconnectScanner != null || current != null || !autoBluetooth) return
         val granted = appContext.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
         if (!granted) return
@@ -199,12 +223,6 @@ object MidiConnector {
     /** The user pressed Disconnect: also forget the Bluetooth controller, so it is not reconnected. */
     fun disconnect() {
         if (currentIsBle) prefs.edit().remove("ble_address").remove("ble_name").remove("ble_bt_name").apply()
-        stopBleReconnect()
-        detach()
-    }
-
-    /** The app is shutting down: close the device but remember it for next time. */
-    fun release() {
         stopBleReconnect()
         detach()
     }

@@ -49,6 +49,7 @@ class MainActivity : Activity() {
         startForegroundService(Intent(this, SynthService::class.java))
         MidiConnector.init(applicationContext)
         MidiConnector.onChange = { runOnUiThread { showDevices() } }
+        SynthService.onStopped = { runOnUiThread { finishAndRemoveTask() } }
         instruments = Native.instruments()
         setContentView(buildUi())
         applySavedSettings()
@@ -111,6 +112,11 @@ class MainActivity : Activity() {
         deviceList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(deviceList)
         root.addView(button("Scan for Bluetooth LE controllers") { scanBle() })
+        root.addView(android.widget.Switch(this).apply {
+            text = "Reconnect the Bluetooth controller by itself, also in the background"
+            isChecked = MidiConnector.autoBluetooth
+            setOnCheckedChangeListener { _, on -> MidiConnector.autoBluetooth = on }
+        })
 
         root.addView(label("Instrument", bold = true))
         val names = instruments.map { "${it.group} / ${it.name}" }
@@ -155,6 +161,10 @@ class MainActivity : Activity() {
         actions.addView(button("Panic") { Native.nativePanic() }, LinearLayout.LayoutParams(0, -2, 1f))
         actions.addView(button("Reset latency tuner") { Native.nativeResetLatencyTuner() }, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(actions)
+        root.addView(button("Stop (sound and controller off until the app is opened again)") {
+            stopService(Intent(this, SynthService::class.java))
+            finishAndRemoveTask()
+        })
 
         root.addView(label("Latency and load", bold = true))
         stats = TextView(this).apply { typeface = Typeface.MONOSPACE; textSize = 13f }
