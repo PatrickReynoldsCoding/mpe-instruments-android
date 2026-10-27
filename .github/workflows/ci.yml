@@ -79,4 +79,4 @@ jobs:
           arch: x86_64
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
           disable-animations: true
-          script: python3 -I tools/emulator_test.py
+          script: python3 -I tools/emulator_test.py || (adb logcat -d -v time -s mpe:* mpe-test:* fakeseaboard:* MidiService.Client:* AndroidRuntime:E | grep -v STATS | tail -150; exit 1)

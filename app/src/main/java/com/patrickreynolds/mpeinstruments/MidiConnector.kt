@@ -26,6 +26,7 @@ object MidiConnector {
     private var current: MidiDevice? = null
     private var currentId = -1
     private var currentIsBle = false
+    private var pendingId = -1                    // device being opened (openDevice is asynchronous)
     private var started = false
     // Bluetooth MIDI devices only exist once an app opens them, so after a dropout nothing
     // brings them back by itself. Remember the last one and scan for it until it returns.
@@ -68,11 +69,14 @@ object MidiConnector {
             override fun onDeviceAdded(info: MidiDeviceInfo) {
                 // A Bluetooth device only appears here because something just opened it (we did, in
                 // connectBluetooth): opening it again would race that and replace it.
-                if (current == null && info.type != MidiDeviceInfo.TYPE_BLUETOOTH && info.outputPortCount > 0 &&
-                    looksLikeController(info)) connect(info)
+                if (current == null && pendingId == -1 && info.type != MidiDeviceInfo.TYPE_BLUETOOTH &&
+                    info.outputPortCount > 0 && looksLikeController(info)) connect(info)
                 onChange?.invoke()
             }
             override fun onDeviceRemoved(info: MidiDeviceInfo) {
+                // Removed while we were still opening it (a USB device that resets re-appears with a
+                // new id): drop that open, so a fresh one of the new device can start.
+                if (info.id == pendingId) pendingId = -1
                 if (info.id == currentId) {
                     val wasBle = currentIsBle
                     detach()
@@ -84,6 +88,22 @@ object MidiConnector {
         // A controller that is already plugged in, else the Bluetooth one used last time.
         val plugged = devices().firstOrNull { it.type != MidiDeviceInfo.TYPE_BLUETOOTH && looksLikeController(it) }
         if (plugged != null) connect(plugged) else startBleReconnect()
+        handler.postDelayed(portCheck, 1000)
+    }
+
+    // Safety net: if the native side finds the port dead (receive failed) while Android still
+    // lists the device, detach and connect again rather than sit there silently.
+    private val portCheck = object : Runnable {
+        override fun run() {
+            if (current != null && Native.nativeStats()[17] < 0) {
+                Log.w(TAG, "MIDI port stopped working, reconnecting")
+                val wasBle = currentIsBle
+                detach()
+                val again = devices().firstOrNull { it.type != MidiDeviceInfo.TYPE_BLUETOOTH && looksLikeController(it) }
+                if (again != null) connect(again) else if (wasBle) startBleReconnect()
+            }
+            handler.postDelayed(this, 1000)
+        }
     }
 
     /** "Waiting for <name>" while a Bluetooth controller is being looked for, else "". */
@@ -131,8 +151,18 @@ object MidiConnector {
 
     fun connect(info: MidiDeviceInfo) {
         val port = info.ports.firstOrNull { it.type == MidiDeviceInfo.PortInfo.TYPE_OUTPUT } ?: return
+        pendingId = info.id
         manager.openDevice(info, { device ->
+            val stillWanted = pendingId == info.id && manager.devices.any { it.id == info.id }
+            if (pendingId == info.id) pendingId = -1
             if (device == null) { Log.w(TAG, "could not open ${name(info)}"); return@openDevice }
+            if (!stillWanted) {                          // it went away while opening: do not attach to a dead port
+                Log.i(TAG, "${name(info)} was removed while opening; skipped")
+                device.close()
+                devices().firstOrNull { it.type != MidiDeviceInfo.TYPE_BLUETOOTH && looksLikeController(it) }
+                    ?.takeIf { current == null && pendingId == -1 }?.let { connect(it) }
+                return@openDevice
+            }
             attach(device, info, port.portNumber)
         }, handler)
     }
