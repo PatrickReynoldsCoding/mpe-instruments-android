@@ -222,7 +222,36 @@ if want("switch"):
         check("switch: no clipping during the switches", res["peak"] < 0.99, f"peak {res['peak']}")
     time.sleep(1)
 
-# ---- 6. app killed and started again ------------------------------------------------------------
+# ---- 6. screen off: the foreground service must keep the audio and MIDI going -----------------
+if want("screen"):
+    app_cmd("SET", "--es", "instrument", "strings/cello")
+    adb("shell", "input", "keyevent", "KEYCODE_SLEEP")
+    time.sleep(3)
+    wav = record(4, "screenoff", lambda: fake_cmd("NOTE", "--ei", "channel", "6", "--ei", "note", "50", "--ef", "seconds", "2"))
+    if wav:
+        res = analyze(wav, midi_hz(50), 0.8, 1.8)
+        check("screen off: still plays, in tune", res["cents_off"] is not None and abs(res["cents_off"]) <= 30 and res["held_rms"] > 0.005,
+              f"rms {res['held_rms']}, {res['cents_off']} cents")
+    else:
+        check("screen off: recording", False)
+    st = stats()
+    check("screen off: still connected", st.get("midiState") == "1")
+    # Doze: what a phone does after lying screen-off for a while.
+    adb("shell", "dumpsys", "deviceidle", "force-idle", check_rc=False)
+    time.sleep(2)
+    wav = record(4, "doze", lambda: fake_cmd("NOTE", "--ei", "channel", "7", "--ei", "note", "52", "--ef", "seconds", "2"))
+    if wav:
+        res = analyze(wav, midi_hz(52), 0.8, 1.8)
+        check("doze: still plays, in tune", res["cents_off"] is not None and abs(res["cents_off"]) <= 30 and res["held_rms"] > 0.005,
+              f"rms {res['held_rms']}, {res['cents_off']} cents")
+    else:
+        check("doze: recording", False)
+    adb("shell", "dumpsys", "deviceidle", "unforce", check_rc=False)
+    adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
+    adb("shell", "wm", "dismiss-keyguard", check_rc=False)
+    time.sleep(1)
+
+# ---- 7. app killed and started again ------------------------------------------------------------
 if want("restart"):
     adb("shell", "am", "force-stop", APP)
     time.sleep(1)
