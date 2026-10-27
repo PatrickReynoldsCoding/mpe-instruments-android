@@ -38,7 +38,10 @@ finger -> Seaboard scan ----- USB or BLE ----- Android MIDI service -> [app call
    message waits at most until the next callback, which is one burst.
 5. **Callback rules.** The engine never allocates, locks, or logs in `render`. Instrument
    switching is built off the audio thread and swapped in with an atomic pointer.
-6. **No Java `MidiReceiver`.** That path goes through Binder, a Java thread and the garbage
+6. **The stream is watched.** If the audio stream reports an impossible latency (it happens
+   after the audio server restarts: the stream keeps running but its timestamps are seconds
+   off) a health check reopens it. The status screen counts these restarts.
+7. **No Java `MidiReceiver`.** That path goes through Binder, a Java thread and the garbage
    collector, and is the usual source of "Android MIDI is laggy" reports.
 
 ## What the status screen measures
@@ -68,6 +71,14 @@ callback").
 - **Whether exclusive/MMAP is granted** on the target phone. The status screen shows it.
 - **Bluetooth connection interval.** With the framework's BLE MIDI the app cannot set it.
   Compare against the same controller on iOS if you can.
+
+## What the emulator says (and does not)
+
+The emulator runs the whole chain (`tools/emulator_test.py`), but its audio is a software
+device: burst 960 frames (20 ms), shared mode, no MMAP, about 110-120 ms output latency. Those
+numbers say nothing about a phone. What the emulator does show: every MIDI message reaches the
+engine within the callback after it arrives, none are dropped, and the engine's CPU use is
+small. The latency work can only be judged on real phones.
 
 ## Results
 
