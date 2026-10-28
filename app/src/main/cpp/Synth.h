@@ -31,6 +31,9 @@ public:
     bool attachMidi(JNIEnv* env, jobject device, int port);
     void detachMidi();
     bool midiAttached() const { return port_.load() != nullptr; }
+    // The on-screen pad: one MIDI message (2 or 3 bytes), from the UI thread only. The audio
+    // thread reads it at the next callback, through the same parser as the controller.
+    void touchMidi(uint8_t status, uint8_t d1, uint8_t d2);
 
     // Settings: remembered here so they survive the engine being rebuilt (sample rate change).
     void setInstrument(int index) { setInstrument(0, index); }
@@ -94,6 +97,8 @@ private:
     std::atomic<bool> lost_{false};                 // tell the audio thread to release every note
     std::atomic<bool> portBroken_{false};
     std::atomic<uint64_t> midiBytes_{0}, midiErrors_{0};
+    mpe::Spsc<mpe::Msg> touch_{1024};               // UI thread -> audio thread
+    std::atomic<bool> touchLost_{false};            // the queue was full: release every note
 
     // debug capture: written by the audio thread only while armed
     std::vector<float> cap_;

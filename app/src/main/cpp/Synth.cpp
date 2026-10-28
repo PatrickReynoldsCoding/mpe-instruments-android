@@ -250,6 +250,19 @@ void Synth::pollMidi(int64_t nowNs) {
         }
     }
     polling_.store(false, std::memory_order_release);
+    if (touchLost_.exchange(false)) { if (audioEngine_) audioEngine_->panic(); }
+    for (mpe::Msg m; touch_.pop(m);) {
+        const uint8_t b[3] = {m.status, m.d1, m.d2};
+        const int n = (m.type() == mpe::kChanPress || m.type() == mpe::kProgram) ? 2 : 3;
+        midi_->feed(b, n, m.timeNs);
+    }
+}
+
+void Synth::touchMidi(uint8_t status, uint8_t d1, uint8_t d2) {
+    mpe::Msg m;
+    m.status = status; m.d1 = d1 & 0x7F; m.d2 = d2 & 0x7F;
+    m.timeNs = mpe::steadyNowNs();
+    if (!touch_.push(m)) touchLost_ = true;              // never leave a note hanging
 }
 
 bool Synth::attachMidi(JNIEnv* env, jobject deviceObj, int portNumber) {

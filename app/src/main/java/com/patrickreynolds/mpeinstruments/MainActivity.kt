@@ -5,7 +5,13 @@ import android.bluetooth.BluetoothDevice
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.content.pm.ActivityInfo
 import android.os.Bundle
+import android.view.WindowManager
+import androidx.activity.compose.BackHandler
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -49,6 +55,7 @@ import com.patrickreynolds.mpeinstruments.ui.Ink
 import com.patrickreynolds.mpeinstruments.ui.MpeIcons
 import com.patrickreynolds.mpeinstruments.ui.MpeTheme
 import com.patrickreynolds.mpeinstruments.ui.Panel
+import com.patrickreynolds.mpeinstruments.ui.PadScreen
 import com.patrickreynolds.mpeinstruments.ui.PartColors
 import com.patrickreynolds.mpeinstruments.ui.PerformScreen
 import com.patrickreynolds.mpeinstruments.ui.PlayScreen
@@ -60,12 +67,13 @@ import com.patrickreynolds.mpeinstruments.ui.TextDim
 import com.patrickreynolds.mpeinstruments.ui.Warn
 import kotlinx.coroutines.delay
 
-/** Four tabs: Play (the touch view), Perform (split, arp, tempo, scale), Sound (effects), Setup. */
+/** Four tabs: Play (the way into the fullscreen touch pad), Perform (split, arp, tempo, scale), Sound (effects), Setup. */
 class MainActivity : ComponentActivity() {
     private var ble: BleScanner? = null
     private val bleFound = mutableStateListOf<BluetoothDevice>()
     private var scanning by mutableStateOf(false)
     private var midiTick by mutableIntStateOf(0)            // bumped when devices come, go or connect
+    private var padOpen by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -96,6 +104,22 @@ class MainActivity : ComponentActivity() {
         scanning = true
     }
 
+    /** The touch pad takes the whole screen: landscape, no system bars, screen kept on. */
+    private fun showPad(open: Boolean) {
+        padOpen = open
+        val bars = WindowCompat.getInsetsController(window, window.decorView)
+        if (open) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            bars.hide(WindowInsetsCompat.Type.systemBars())
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            bars.show(WindowInsetsCompat.Type.systemBars())
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
     private fun stopApp() {
         stopService(Intent(this, SynthService::class.java))
         finishAndRemoveTask()
@@ -108,6 +132,22 @@ class MainActivity : ComponentActivity() {
         var stats by remember { mutableStateOf<Stats?>(null) }
         var presets by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { while (true) { stats = Stats.from(Native.nativeStats()); delay(250) } }
+        // Split > Learn: the next note played sets the split point (the engine splits on the note as sent).
+        LaunchedEffect(AppState.learningSplit) {
+            val buf = FloatArray(16 * 5)
+            while (AppState.learningSplit) {
+                if (Native.nativeFingers(buf) > 0) {
+                    AppState.update { it.copy(splitNote = buf[1].toInt()) }
+                    AppState.learningSplit = false
+                }
+                delay(15)
+            }
+        }
+        if (padOpen) {
+            BackHandler { showPad(false) }
+            PadScreen { showPad(false) }
+            return
+        }
         val tick = midiTick
         Scaffold(
             containerColor = Ink,
@@ -138,7 +178,7 @@ class MainActivity : ComponentActivity() {
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
                 when (tab) {
-                    0 -> PlayScreen(stats)
+                    0 -> PlayScreen(stats) { showPad(true) }
                     1 -> PerformScreen()
                     2 -> SoundScreen()
                     else -> SetupScreen(stats, SetupActions(bleFound, scanning, ::scanBle, ::stopApp), tick)

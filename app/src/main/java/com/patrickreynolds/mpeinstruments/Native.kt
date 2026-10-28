@@ -11,6 +11,8 @@ object Native {
 
     external fun nativeAttachMidi(device: MidiDevice, port: Int): Boolean
     external fun nativeDetachMidi()
+    /** One MIDI message from the on-screen pad (UI thread only). */
+    external fun nativeTouch(status: Int, d1: Int, d2: Int)
 
     external fun nativeInstrumentCount(): Int
     /** field: 0 id, 1 group, 2 name, 3 description, 4 range ("low high" in Hz, or "") */

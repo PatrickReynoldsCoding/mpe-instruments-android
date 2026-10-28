@@ -96,6 +96,29 @@ data class Perf(
     }
 }
 
+/** The on-screen pad: columns of notes left to right, up and down for loudness and tone. */
+data class PadSettings(
+    val size: Int = 8,             // columns (notes) across the screen
+    val octave: Int = 0,           // 0 = the middle of the instrument's range
+    val key: Int = 0,              // 0 = C
+    val scale: Int = 1,            // index into SCALES; 0 (Off) plays every semitone
+    val vertical: Int = 0,         // up/down: 0 loudness and tone, 1 tone, 2 loudness
+    val snap: Boolean = true,      // start on the column's note and settle back to it when resting
+) {
+    fun json() = JSONObject().apply {
+        put("size", size); put("octave", octave); put("key", key); put("scale", scale)
+        put("vertical", vertical); put("snap", snap)
+    }
+
+    companion object {
+        val VERTICAL = listOf("Loudness + tone", "Tone", "Loudness")
+        fun from(o: JSONObject?, d: PadSettings = PadSettings()) = if (o == null) d else PadSettings(
+            o.optInt("size", d.size).coerceIn(3, 24), o.optInt("octave", d.octave).coerceIn(-4, 4),
+            o.optInt("key", d.key).coerceIn(0, 11), o.optInt("scale", d.scale).coerceIn(SCALES.indices),
+            o.optInt("vertical", d.vertical).coerceIn(0, 2), o.optBoolean("snap", d.snap))
+    }
+}
+
 data class Scale(val name: String, val mask: Int)
 
 /** Bit n = the note n semitones above the root is in the scale. */

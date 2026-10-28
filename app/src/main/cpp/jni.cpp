@@ -15,6 +15,9 @@ FN(jboolean, nativeAttachMidi)(JNIEnv* env, jobject, jobject device, jint port) 
     return synth().attachMidi(env, device, port);
 }
 FN(void, nativeDetachMidi)(JNIEnv*, jobject) { synth().detachMidi(); }
+FN(void, nativeTouch)(JNIEnv*, jobject, jint status, jint d1, jint d2) {
+    synth().touchMidi(uint8_t(status), uint8_t(d1), uint8_t(d2));
+}
 
 FN(jint, nativeInstrumentCount)(JNIEnv*, jobject) { int n = 0; mpe::instruments(n); return n; }
 FN(jstring, nativeInstrumentField)(JNIEnv* env, jobject, jint index, jint field) {

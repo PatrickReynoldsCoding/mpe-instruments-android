@@ -34,6 +34,9 @@ object AppState {
         private set
     /** Set the split point from the next note played. */
     var learningSplit by mutableStateOf(false)
+    /** The on-screen pad's layout; not part of a preset. */
+    var pad by mutableStateOf(PadSettings())
+        private set
 
     fun init(context: Context) {
         if (started) return
@@ -48,6 +51,7 @@ object AppState {
         transpose = prefs.getInt("transpose", 0)
         bendRange = prefs.getFloat("bend", 48f)
         presetName = prefs.getString("preset", "") ?: ""
+        pad = runCatching { PadSettings.from(prefs.getString("pad", null)?.let { JSONObject(it) }) }.getOrDefault(PadSettings())
         userPresets = runCatching {
             val a = JSONArray(prefs.getString("presets", "[]"))
             (0 until a.length()).map { a.getJSONObject(it).let { o -> Preset(o.getString("name"), Perf.from(o.getJSONObject("perf"))) } }
@@ -98,6 +102,11 @@ object AppState {
         prefs.edit().putInt("transpose", transpose).apply()
     }
     fun changeBendRange(v: Float) { bendRange = v; Native.nativeSetBendRange(v); prefs.edit().putFloat("bend", v).apply() }
+
+    fun updatePad(change: (PadSettings) -> PadSettings) {
+        pad = change(pad)
+        prefs.edit().putString("pad", pad.json().toString()).apply()
+    }
 
     // ---- presets ----------------------------------------------------------------------------
 

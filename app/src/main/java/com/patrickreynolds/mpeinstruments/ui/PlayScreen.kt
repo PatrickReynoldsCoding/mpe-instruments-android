@@ -3,6 +3,8 @@ package com.patrickreynolds.mpeinstruments.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -52,9 +54,9 @@ import com.patrickreynolds.mpeinstruments.noteName
 import kotlin.math.roundToInt
 
 @Composable
-fun PlayScreen(stats: Stats?) {
+fun PlayScreen(stats: Stats?, openPad: () -> Unit) {
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
-        TouchView()
+        PadCard(openPad)
         OctaveWarning(stats)
         val perf = AppState.perf
         val parts = if (perf.layout == 0) listOf(0) else listOf(0, 1)
@@ -68,6 +70,36 @@ fun PlayScreen(stats: Stats?) {
             Button(onClick = { Native.nativePanic() }, modifier = Modifier.fillMaxWidth(),
                    colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = Color.White)) {
                 Text("Panic: stop every note")
+            }
+        }
+    }
+}
+
+/** The way into the fullscreen touch pad. */
+@Composable
+private fun PadCard(open: () -> Unit) {
+    Card(Modifier.fillMaxWidth().padding(16.dp).height(150.dp).clickable(onClick = open), shape = RoundedCornerShape(22.dp),
+         colors = CardDefaults.cardColors(containerColor = Panel)) {
+        Box(Modifier.fillMaxSize()) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawRect(Brush.linearGradient(listOf(Color(0xFF2A1F3D), Color(0xFF0E1014), Color(0xFF0F2A30))))
+                for (i in 0 until 8) {
+                    val x = (i + 0.5f) * size.width / 8
+                    drawLine(Color.White.copy(alpha = 0.08f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
+                }
+                for ((k, c) in PartColors.withIndex()) {
+                    val at = Offset(size.width * (0.62f + 0.2f * k), size.height * (0.38f + 0.25f * k))
+                    drawCircle(Brush.radialGradient(listOf(c.copy(alpha = 0.6f), c.copy(alpha = 0f)), center = at, radius = 90f), 90f, at)
+                    drawCircle(Color.White.copy(alpha = 0.9f), 10f, at)
+                }
+            }
+            Column(Modifier.align(Alignment.CenterStart).padding(20.dp)) {
+                Text("Touch pad", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                Text("Play with your fingers, full screen", color = TextDim, fontSize = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = open, colors = ButtonDefaults.buttonColors(containerColor = PartColors[0], contentColor = Ink)) {
+                    Text("Play")
+                }
             }
         }
     }
@@ -145,94 +177,6 @@ fun InstrumentRow(part: Int, label: String) {
                     }
                 }
             }
-        }
-    }
-}
-
-/**
- * What the hands are doing, live: a strip of keys like the Seaboard's, each finger a glow
- * whose position is its pitch (bend included), height its slide and size its pressure. Arp
- * and layered notes show as rings.
- */
-@Composable
-fun TouchView() {
-    val fingerBuf = remember { FloatArray(16 * 5) }
-    val voiceBuf = remember { FloatArray(32 * 8) }
-    var frame by remember { mutableIntStateOf(0) }
-    var nFingers by remember { mutableIntStateOf(0) }
-    var nVoices by remember { mutableIntStateOf(0) }
-    var low by remember { mutableFloatStateOf(48f) }          // the lowest key shown (a C), follows the hands
-    var keys by remember { mutableIntStateOf(25) }            // keys shown: two octaves, more when the hands spread
-    LaunchedEffect(Unit) {
-        while (true) {
-            withFrameNanos { }
-            nFingers = Native.nativeFingers(fingerBuf)
-            nVoices = Native.nativeVoices(voiceBuf)
-            if (AppState.learningSplit && nFingers > 0) {
-                // The engine splits on the note as sent (before transpose).
-                val note = fingerBuf[1].toInt()
-                AppState.update { it.copy(splitNote = note) }
-                AppState.learningSplit = false
-            }
-            if (nFingers > 0) {
-                var lo = Float.MAX_VALUE; var hi = -Float.MAX_VALUE
-                for (i in 0 until nFingers) { lo = minOf(lo, fingerBuf[5 * i + 2]); hi = maxOf(hi, fingerBuf[5 * i + 2]) }
-                if (lo < low + 0.5f || hi > low + keys - 1.5f) {      // keep a key clear at each edge
-                    // Cover both hands with a key to spare, starting on a C: 2 to 4 octaves.
-                    val start = Math.floorDiv(minOf(lo - 1, (lo + hi) / 2 - 12).toInt(), 12) * 12
-                    keys = (((hi + 2 - start) / 12f).toInt() + 1).coerceIn(2, 4) * 12 + 1
-                    low = start.toFloat()
-                }
-            }
-            frame++
-        }
-    }
-    val perf = AppState.perf
-    Card(Modifier.fillMaxWidth().padding(16.dp).height(230.dp), shape = RoundedCornerShape(22.dp),
-         colors = CardDefaults.cardColors(containerColor = Panel)) {
-        Canvas(Modifier.fillMaxWidth().height(230.dp)) {
-            frame.let { }                                       // redraw every frame
-            val kw = size.width / keys
-            val black = setOf(1, 3, 6, 8, 10)
-            for (k in 0 until keys) {
-                val note = low.toInt() + k
-                val isBlack = (note % 12) in black
-                drawRect(if (isBlack) Ink.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.035f),
-                         topLeft = Offset(k * kw + 1, 0f), size = Size(kw - 2, size.height))
-                if (note % 12 == 0 && k < keys - 1) drawContext.canvas.nativeCanvas.drawText(noteName(note), k * kw + maxOf(6f, if (k == 0) 22f else 6f), size.height - 22,
-                    android.graphics.Paint().apply { color = 0x88FFFFFF.toInt(); textSize = 26f; isAntiAlias = true })
-            }
-            fun xOf(pitch: Float) = (pitch - low + 0.5f) * kw
-            if (perf.layout == 1) {
-                val x = xOf(perf.splitNote + AppState.transpose - 0.5f)
-                drawLine(Warn.copy(alpha = 0.7f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 3f)
-            }
-            for (i in 0 until nVoices) {                        // rings: what is sounding
-                val b = 8 * i
-                val part = voiceBuf[b].toInt().coerceIn(0, 1)
-                val gate = voiceBuf[b + 3] > 0.5f
-                val level = voiceBuf[b + 7]
-                val x = xOf(voiceBuf[b + 4] - perf.part(part).transpose)
-                val y = size.height * (1f - voiceBuf[b + 6]) * 0.85f + size.height * 0.05f
-                val a = (if (gate) 0.9f else 0.35f) * (0.4f + 0.6f * minOf(1f, level * 30f))
-                drawCircle(PartColors[part].copy(alpha = a), radius = 14f + 40f * voiceBuf[b + 5], center = Offset(x, y),
-                           style = Stroke(width = 4f))
-            }
-            for (i in 0 until nFingers) {                       // glows: the fingers
-                val b = 5 * i
-                val note = fingerBuf[b + 1].toInt()
-                val part = if (perf.layout == 1 && note >= perf.splitNote) 1 else 0
-                val x = xOf(fingerBuf[b + 2])
-                val y = size.height * (1f - fingerBuf[b + 4]) * 0.85f + size.height * 0.05f
-                val r = 22f + 70f * fingerBuf[b + 3]
-                val c = PartColors[part]
-                drawCircle(Brush.radialGradient(listOf(c.copy(alpha = 0.85f), c.copy(alpha = 0f)), center = Offset(x, y), radius = r * 1.6f),
-                           radius = r * 1.6f, center = Offset(x, y))
-                drawCircle(c, radius = 10f, center = Offset(x, y))
-            }
-            if (nFingers == 0 && nVoices == 0) drawContext.canvas.nativeCanvas.drawText(
-                "Play the Seaboard: pitch ← →, slide ↑ ↓, press to swell", size.width / 2, size.height / 2,
-                android.graphics.Paint().apply { color = 0x66FFFFFF; textSize = 34f; isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER })
         }
     }
 }

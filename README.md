@@ -22,7 +22,9 @@ What it does:
 - **Sound**: per part brightness, drive, touch response, reverb and delay sends; a Zita reverb
   and a tempo-synced ping-pong delay. Tap tempo.
 - **Presets**: ten built in, save your own.
-- **A live touch view** of every finger (pitch, slide, pressure) and what is sounding.
+- **A fullscreen touch pad**: play with your fingers, no controller needed. Columns of notes in
+  a key and scale, slide to glide, higher up for louder and brighter; each finger its own MPE
+  voice, so the arp, split and effects apply. A Seaboard played at the same time shows there too.
 - **An octave warning** when the controller's notes are far from the instrument's range.
 - Bluetooth reconnects by itself (can be turned off); Stop turns everything off.
 
