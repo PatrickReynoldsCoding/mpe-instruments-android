@@ -119,7 +119,7 @@ private fun TempoCard() {
                 val bpm = 60000.0 * (taps.size - 1) / (taps.last() - taps.first())
                 AppState.update { it.copy(bpm = bpm.roundToInt().coerceIn(40, 220).toFloat()) }
             }
-        }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = PartColors[0])) {
+        }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = PartColors[0]), border = ButtonEdge) {
             Text("Tap tempo")
         }
     }

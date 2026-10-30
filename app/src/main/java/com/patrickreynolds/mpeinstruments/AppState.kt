@@ -5,6 +5,9 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.patrickreynolds.mpeinstruments.ui.DarkPalette
+import com.patrickreynolds.mpeinstruments.ui.EinkPalette
+import com.patrickreynolds.mpeinstruments.ui.palette
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -38,6 +41,10 @@ object AppState {
     var pad by mutableStateOf(PadSettings())
         private set
 
+    /** E-ink look (black on white, no motion); not part of a preset. */
+    var eink by mutableStateOf(false)
+        private set
+
     fun init(context: Context) {
         if (started) return
         started = true
@@ -51,6 +58,8 @@ object AppState {
         transpose = prefs.getInt("transpose", 0)
         bendRange = prefs.getFloat("bend", 48f)
         presetName = prefs.getString("preset", "") ?: ""
+        eink = prefs.getBoolean("eink", false)
+        palette = if (eink) EinkPalette else DarkPalette
         pad = runCatching { PadSettings.from(prefs.getString("pad", null)?.let { JSONObject(it) }) }.getOrDefault(PadSettings())
         userPresets = runCatching {
             val a = JSONArray(prefs.getString("presets", "[]"))
@@ -102,6 +111,12 @@ object AppState {
         prefs.edit().putInt("transpose", transpose).apply()
     }
     fun changeBendRange(v: Float) { bendRange = v; Native.nativeSetBendRange(v); prefs.edit().putFloat("bend", v).apply() }
+
+    fun changeEink(on: Boolean) {
+        eink = on
+        palette = if (on) EinkPalette else DarkPalette
+        prefs.edit().putBoolean("eink", on).apply()
+    }
 
     fun updatePad(change: (PadSettings) -> PadSettings) {
         pad = change(pad)

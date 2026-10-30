@@ -104,18 +104,26 @@ data class PadSettings(
     val scale: Int = 1,            // index into SCALES; 0 (Off) plays every semitone
     val vertical: Int = 0,         // up/down: 0 loudness and tone, 1 tone, 2 loudness
     val snap: Boolean = true,      // start on the column's note and settle back to it when resting
+    val shift: Int = 0,            // columns moved by dragging the note strip (scale steps)
+    val locked: Boolean = false,   // the note strip plays notes instead of moving them
+    val theme: Int = 0,            // index into PAD_THEMES (the e-ink look overrides it)
+    val lines: Int = 1,            // how strongly the columns are drawn: 0 soft, 1 clear, 2 bold
 ) {
     fun json() = JSONObject().apply {
         put("size", size); put("octave", octave); put("key", key); put("scale", scale)
-        put("vertical", vertical); put("snap", snap)
+        put("vertical", vertical); put("snap", snap); put("shift", shift); put("locked", locked)
+        put("theme", theme); put("lines", lines)
     }
 
     companion object {
         val VERTICAL = listOf("Loudness + tone", "Tone", "Loudness")
+        val LINES = listOf("Soft", "Clear", "Bold")
         fun from(o: JSONObject?, d: PadSettings = PadSettings()) = if (o == null) d else PadSettings(
             o.optInt("size", d.size).coerceIn(3, 24), o.optInt("octave", d.octave).coerceIn(-4, 4),
             o.optInt("key", d.key).coerceIn(0, 11), o.optInt("scale", d.scale).coerceIn(SCALES.indices),
-            o.optInt("vertical", d.vertical).coerceIn(0, 2), o.optBoolean("snap", d.snap))
+            o.optInt("vertical", d.vertical).coerceIn(0, 2), o.optBoolean("snap", d.snap),
+            o.optInt("shift", d.shift).coerceIn(-128, 128), o.optBoolean("locked", d.locked),
+            o.optInt("theme", d.theme).coerceIn(0, 9), o.optInt("lines", d.lines).coerceIn(0, 2))
     }
 }
 

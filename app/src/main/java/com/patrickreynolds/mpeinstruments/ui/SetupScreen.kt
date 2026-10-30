@@ -57,7 +57,7 @@ fun SetupScreen(stats: Stats?, actions: SetupActions, @Suppress("UNUSED_PARAMETE
                     Text("Connect ${d.name ?: d.address} (Bluetooth)")
                 }
             Button(onClick = actions.scan, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                   colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = PartColors[1])) {
+                   colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = PartColors[1]), border = ButtonEdge) {
                 Text(if (actions.scanning) "Looking for Bluetooth controllers…" else "Find a Bluetooth controller")
             }
             Text("USB: plug the Seaboard in and it connects by itself. Bluetooth: switch the Seaboard on, then find it here once.",
@@ -79,10 +79,16 @@ fun SetupScreen(stats: Stats?, actions: SetupActions, @Suppress("UNUSED_PARAMETE
             Text("Auto: 1.5 s on Bluetooth, where a lost link is not reported for up to 30 s; off on USB.",
                  color = TextDim, fontSize = 12.sp)
         }
+        SectionCard("Look") {
+            Segmented(listOf("Dark", "E-ink"), if (AppState.eink) 1 else 0) { AppState.changeEink(it == 1) }
+            Text("E-ink: black on white, thick borders, no colour, glow or motion, and the touch pad only redraws when "
+                 + "something changes. For e-ink phones such as the Hisense A9.", color = TextDim, fontSize = 12.sp,
+                 modifier = Modifier.padding(top = 6.dp))
+        }
         SectionCard("Latency") { LatencyPanel(stats) }
         SectionCard("App") {
             Button(onClick = actions.stop, modifier = Modifier.fillMaxWidth(),
-                   colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = Color(0xFFFF6B6B))) {
+                   colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = Danger), border = ButtonEdge) {
                 Text("Stop: sound and controller off until you open the app")
             }
             Text("MPE Instruments ${BuildConfig.VERSION_NAME}", color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))

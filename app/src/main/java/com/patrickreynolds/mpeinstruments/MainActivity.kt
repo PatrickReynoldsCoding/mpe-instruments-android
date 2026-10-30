@@ -14,8 +14,11 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -51,7 +54,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.patrickreynolds.mpeinstruments.ui.Edge
+import com.patrickreynolds.mpeinstruments.ui.Eink
 import com.patrickreynolds.mpeinstruments.ui.Ink
+import com.patrickreynolds.mpeinstruments.ui.Line
 import com.patrickreynolds.mpeinstruments.ui.MpeIcons
 import com.patrickreynolds.mpeinstruments.ui.MpeTheme
 import com.patrickreynolds.mpeinstruments.ui.Panel
@@ -84,7 +90,15 @@ class MainActivity : ComponentActivity() {
         AppState.init(applicationContext)
         MidiConnector.onChange = { runOnUiThread { midiTick++ } }
         SynthService.onStopped = { runOnUiThread { finishAndRemoveTask() } }
-        setContent { MpeTheme { App() } }
+        setContent {
+            // Status and navigation bar icons dark on the e-ink theme's white, light on the dark one.
+            LaunchedEffect(AppState.eink) {
+                val style = if (AppState.eink) SystemBarStyle.light(android.graphics.Color.WHITE, android.graphics.Color.BLACK)
+                            else SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                enableEdgeToEdge(style, style)
+            }
+            MpeTheme { App() }
+        }
     }
 
     override fun onPause() { ble?.stop(); scanning = false; super.onPause() }
@@ -164,14 +178,15 @@ class MainActivity : ComponentActivity() {
                 )
             },
             bottomBar = {
-                NavigationBar(containerColor = Panel) {
+                NavigationBar(containerColor = Panel, modifier = if (Eink) Modifier.border(BorderStroke(Edge, Line)) else Modifier) {
                     val items = listOf(
                         "Play" to Icons.Filled.PlayArrow, "Perform" to MpeIcons.Arp,
                         "Sound" to MpeIcons.Sliders, "Setup" to Icons.Filled.Settings)
                     items.forEachIndexed { i, (label, icon) ->
                         NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(icon, label) }, label = { Text(label) },
-                            colors = NavigationBarItemDefaults.colors(selectedIconColor = PartColors[0], selectedTextColor = PartColors[0],
-                                                                      indicatorColor = PartColors[0].copy(alpha = 0.16f)))
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = if (Eink) Color.White else PartColors[0], selectedTextColor = PartColors[0],
+                                indicatorColor = if (Eink) Color.Black else PartColors[0].copy(alpha = 0.16f)))
                     }
                 }
             },

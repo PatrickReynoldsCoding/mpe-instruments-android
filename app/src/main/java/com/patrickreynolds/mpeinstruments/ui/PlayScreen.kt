@@ -68,7 +68,7 @@ fun PlayScreen(stats: Stats?, openPad: () -> Unit) {
             TransposeRow()
             Spacer(Modifier.height(8.dp))
             Button(onClick = { Native.nativePanic() }, modifier = Modifier.fillMaxWidth(),
-                   colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = Color.White)) {
+                   colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = Fg), border = ButtonEdge) {
                 Text("Panic: stop every note")
             }
         }
@@ -79,15 +79,17 @@ fun PlayScreen(stats: Stats?, openPad: () -> Unit) {
 @Composable
 private fun PadCard(open: () -> Unit) {
     Card(Modifier.fillMaxWidth().padding(16.dp).height(150.dp).clickable(onClick = open), shape = RoundedCornerShape(22.dp),
-         colors = CardDefaults.cardColors(containerColor = Panel)) {
+         colors = CardDefaults.cardColors(containerColor = Panel),
+         border = if (Eink) androidx.compose.foundation.BorderStroke(Edge, Line) else null) {
         Box(Modifier.fillMaxSize()) {
             Canvas(Modifier.fillMaxSize()) {
-                drawRect(Brush.linearGradient(listOf(Color(0xFF2A1F3D), Color(0xFF0E1014), Color(0xFF0F2A30))))
+                if (!Eink) drawRect(Brush.linearGradient(listOf(Color(0xFF2A1F3D), Color(0xFF0E1014), Color(0xFF0F2A30))))
                 for (i in 0 until 8) {
                     val x = (i + 0.5f) * size.width / 8
-                    drawLine(Color.White.copy(alpha = 0.08f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
+                    drawLine(if (Eink) Color.Black.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.08f),
+                             Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
                 }
-                for ((k, c) in PartColors.withIndex()) {
+                if (!Eink) for ((k, c) in PartColors.withIndex()) {
                     val at = Offset(size.width * (0.62f + 0.2f * k), size.height * (0.38f + 0.25f * k))
                     drawCircle(Brush.radialGradient(listOf(c.copy(alpha = 0.6f), c.copy(alpha = 0f)), center = at, radius = 90f), 90f, at)
                     drawCircle(Color.White.copy(alpha = 0.9f), 10f, at)
@@ -132,7 +134,8 @@ fun OctaveWarning(stats: Stats?) {
     val octaves = ((inst.centerNote - playing) / 12.0).roundToInt()
     if (kotlin.math.abs(octaves) < 2) return
     Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), shape = RoundedCornerShape(18.dp),
-         colors = CardDefaults.cardColors(containerColor = Warn.copy(alpha = 0.14f))) {
+         colors = CardDefaults.cardColors(containerColor = Warn.copy(alpha = if (Eink) 0f else 0.14f)),
+         border = if (Eink) androidx.compose.foundation.BorderStroke(Edge, Line) else null) {
         Column(Modifier.padding(16.dp)) {
             Text("Your notes are ${kotlin.math.abs(octaves)} octaves ${if (octaves < 0) "above" else "below"} the ${inst.name.lowercase()}",
                  color = Warn, fontWeight = FontWeight.SemiBold)

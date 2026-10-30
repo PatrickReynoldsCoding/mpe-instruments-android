@@ -25,6 +25,10 @@ What it does:
 - **A fullscreen touch pad**: play with your fingers, no controller needed. Columns of notes in
   a key and scale, slide to glide, higher up for louder and brighter; each finger its own MPE
   voice, so the arp, split and effects apply. A Seaboard played at the same time shows there too.
+  Drag the note strip along the bottom sideways to move the notes (Lock on the rail stops that);
+  six colour themes and soft, clear or bold lines.
+- **An e-ink look** (Setup): black on white, thick borders, no colour or motion, and the pad only
+  redraws when something changes.
 - **An octave warning** when the controller's notes are far from the instrument's range.
 - Bluetooth reconnects by itself (can be turned off); Stop turns everything off.
 

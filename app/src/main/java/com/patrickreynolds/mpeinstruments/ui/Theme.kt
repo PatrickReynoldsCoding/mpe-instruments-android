@@ -1,5 +1,6 @@
 package com.patrickreynolds.mpeinstruments.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -23,7 +24,13 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,29 +39,77 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// A dark stage: the touch view and the two part colours are what stand out.
-val Ink = Color(0xFF0E1014)
-val Panel = Color(0xFF181B22)
-val PanelHigh = Color(0xFF222632)
-val Line = Color(0xFF2E3341)
-val TextDim = Color(0xFF9AA2B4)
-/** Part 0 (main, left of a split) and part 1 (layer, right of a split). */
-val PartColors = listOf(Color(0xFFFF8A65), Color(0xFF4DD0E1))
-val Warn = Color(0xFFFFC857)
-
-private val scheme = darkColorScheme(
-    primary = PartColors[0], onPrimary = Ink,
-    secondary = PartColors[1], onSecondary = Ink,
-    background = Ink, onBackground = Color(0xFFECEFF5),
-    surface = Ink, onSurface = Color(0xFFECEFF5),
-    surfaceVariant = Panel, onSurfaceVariant = TextDim,
-    surfaceContainer = Panel, surfaceContainerHigh = PanelHigh, surfaceContainerHighest = PanelHigh,
-    surfaceContainerLow = Panel, surfaceContainerLowest = Ink,
-    outline = Line, outlineVariant = Line,
+/** The app's colours. Dark: a dark stage where the pad and the two part colours stand out. */
+class Palette(
+    val ink: Color, val panel: Color, val panelHigh: Color, val line: Color, val text: Color, val textDim: Color,
+    val parts: List<Color>, val warn: Color, val danger: Color, val eink: Boolean,
 )
 
+val DarkPalette = Palette(
+    ink = Color(0xFF0E1014), panel = Color(0xFF181B22), panelHigh = Color(0xFF222632), line = Color(0xFF2E3341),
+    text = Color(0xFFECEFF5), textDim = Color(0xFF9AA2B4),
+    parts = listOf(Color(0xFFFF8A65), Color(0xFF4DD0E1)), warn = Color(0xFFFFC857), danger = Color(0xFFFF6B6B), eink = false,
+)
+
+/**
+ * For e-ink screens (as in focus-tracker): black on white, no tints, gradients, glows or motion,
+ * thick borders, the chosen option filled black. The two parts are told apart by black and grey.
+ */
+val EinkPalette = Palette(
+    ink = Color.White, panel = Color.White, panelHigh = Color.White, line = Color.Black,
+    text = Color.Black, textDim = Color(0xFF333333),
+    parts = listOf(Color.Black, Color(0xFF666666)), warn = Color.Black, danger = Color.Black, eink = true,
+)
+
+/** The palette in use; read in composition, so changing it recolours everything. */
+var palette by mutableStateOf(DarkPalette)
+
+val Ink get() = palette.ink
+val Panel get() = palette.panel
+val PanelHigh get() = palette.panelHigh
+val Line get() = palette.line
+val Fg get() = palette.text
+val TextDim get() = palette.textDim
+/** Part 0 (main, left of a split) and part 1 (layer, right of a split). */
+val PartColors get() = palette.parts
+val Warn get() = palette.warn
+val Danger get() = palette.danger
+val Eink get() = palette.eink
+/** Border width of cards and controls: e-ink needs them thick to read. */
+val Edge get() = if (palette.eink) 3.dp else 0.dp
+/** A border for filled buttons, which on e-ink are white on white without one. */
+val ButtonEdge get() = if (palette.eink) BorderStroke(2.dp, Color.Black) else null
+
+private fun scheme(p: Palette) = if (p.eink) lightColorScheme(
+    primary = Color.Black, onPrimary = Color.White, secondary = Color.Black, onSecondary = Color.White,
+    background = Color.White, onBackground = Color.Black, surface = Color.White, onSurface = Color.Black,
+    surfaceVariant = Color.White, onSurfaceVariant = Color.Black,
+    surfaceContainer = Color.White, surfaceContainerHigh = Color.White, surfaceContainerHighest = Color.White,
+    surfaceContainerLow = Color.White, surfaceContainerLowest = Color.White,
+    outline = Color.Black, outlineVariant = Color.Black, secondaryContainer = Color.Black, onSecondaryContainer = Color.White,
+) else darkColorScheme(
+    primary = p.parts[0], onPrimary = p.ink,
+    secondary = p.parts[1], onSecondary = p.ink,
+    background = p.ink, onBackground = p.text,
+    surface = p.ink, onSurface = p.text,
+    surfaceVariant = p.panel, onSurfaceVariant = p.textDim,
+    surfaceContainer = p.panel, surfaceContainerHigh = p.panelHigh, surfaceContainerHighest = p.panelHigh,
+    surfaceContainerLow = p.panel, surfaceContainerLowest = p.ink,
+    outline = p.line, outlineVariant = p.line,
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MpeTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = scheme, content = content)
+fun MpeTheme(content: @Composable () -> Unit) {
+    val p = palette
+    // E-ink: no ripples (they redraw the screen for nothing) and a little bigger text.
+    val typography = if (p.eink) MaterialTheme.typography.let { t ->
+        t.copy(bodyLarge = t.bodyLarge.copy(fontSize = 17.sp), bodyMedium = t.bodyMedium.copy(fontSize = 15.sp))
+    } else MaterialTheme.typography
+    MaterialTheme(colorScheme = scheme(p), typography = typography) {
+        if (p.eink) CompositionLocalProvider(LocalRippleConfiguration provides null, content = content) else content()
+    }
+}
 
 @Composable
 fun SectionCard(title: String, accent: Color? = null, trailing: (@Composable () -> Unit)? = null, content: @Composable () -> Unit) {
@@ -62,6 +117,7 @@ fun SectionCard(title: String, accent: Color? = null, trailing: (@Composable () 
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Panel),
+        border = if (Eink) BorderStroke(Edge, Line) else null,
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -84,7 +140,8 @@ fun LabeledSlider(label: String, value: Float, range: ClosedFloatingPointRange<F
             Text(valueText, color = TextDim, fontSize = 14.sp)
         }
         Slider(value = value, onValueChange = onChange, valueRange = range, steps = steps,
-               colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent, inactiveTrackColor = Line))
+               colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent,
+                                              inactiveTrackColor = if (Eink) Color(0xFFBBBBBB) else Line))
     }
 }
 
@@ -96,9 +153,13 @@ fun Segmented(options: List<String>, selected: Int, accent: Color = PartColors[0
             SegmentedButton(
                 selected = i == selected, onClick = { onSelect(i) },
                 shape = SegmentedButtonDefaults.itemShape(i, options.size),
-                colors = SegmentedButtonDefaults.colors(activeContainerColor = accent.copy(alpha = 0.22f),
-                                                        activeContentColor = accent, activeBorderColor = accent,
-                                                        inactiveBorderColor = Line),
+                colors = if (Eink) SegmentedButtonDefaults.colors(activeContainerColor = Color.Black, activeContentColor = Color.White,
+                                                                  activeBorderColor = Color.Black, inactiveBorderColor = Color.Black,
+                                                                  inactiveContainerColor = Color.White, inactiveContentColor = Color.Black)
+                         else SegmentedButtonDefaults.colors(activeContainerColor = accent.copy(alpha = 0.22f),
+                                                             activeContentColor = accent, activeBorderColor = accent,
+                                                             inactiveBorderColor = Line),
+                border = if (Eink) BorderStroke(2.dp, Color.Black) else SegmentedButtonDefaults.borderStroke(if (i == selected) accent else Line),
                 icon = {},
             ) { Text(label, fontSize = 13.sp, maxLines = 1) }
         }
@@ -112,8 +173,11 @@ fun Chips(options: List<String>, selected: Int, accent: Color = PartColors[0], o
         options.forEachIndexed { i, label ->
             FilterChip(
                 selected = i == selected, onClick = { onSelect(i) }, label = { Text(label) },
-                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = accent.copy(alpha = 0.22f),
-                                                             selectedLabelColor = accent),
+                colors = if (Eink) FilterChipDefaults.filterChipColors(selectedContainerColor = Color.Black, selectedLabelColor = Color.White,
+                                                                       labelColor = Color.Black)
+                         else FilterChipDefaults.filterChipColors(selectedContainerColor = accent.copy(alpha = 0.22f),
+                                                                  selectedLabelColor = accent),
+                border = if (Eink) BorderStroke(2.dp, Color.Black) else FilterChipDefaults.filterChipBorder(true, i == selected),
             )
         }
     }
@@ -128,7 +192,9 @@ fun SwitchRow(label: String, checked: Boolean, detail: String? = null, accent: C
         }
         Spacer(Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = onChange,
-               colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = accent, checkedThumbColor = Ink))
+               colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = accent, checkedThumbColor = Ink,
+                   uncheckedBorderColor = if (Eink) Color.Black else Color.Unspecified,
+                   uncheckedThumbColor = if (Eink) Color.Black else Color.Unspecified))
     }
 }
 
