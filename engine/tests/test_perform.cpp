@@ -76,6 +76,26 @@ int main() {
         CHECK(gated(r, 0, 48) == 1, "split: a finger that glides across the split stays on its part");
     }
 
+    // ---- split, chosen by the finger (CC 9, the screen pad): any note can play either part ----
+    {
+        Rig r("strings/cello");
+        r.engine.setInstrument(1, findInstrument("winds/flute"));
+        Performance p;
+        p.layout = Layout::Split;
+        p.splitNote = 60;
+        r.engine.setPerformance(p);
+        r.run(0.01);
+        r.send(0xB1, 9, 2); r.noteOn(1, 48, 80);          // low note, right part
+        r.send(0xB2, 9, 1); r.noteOn(2, 72, 80);          // high note, left part
+        r.run(0.2);
+        CHECK(gated(r, 1, 48) == 1 && gated(r, 0, 48) == 0, "split CC 9: note 48 plays the right part when the finger asks");
+        CHECK(gated(r, 0, 72) == 1 && gated(r, 1, 72) == 0, "split CC 9: note 72 plays the left part when the finger asks");
+        r.noteOff(1, 48); r.noteOff(2, 72); r.run(0.05);
+        r.noteOn(1, 48, 80);                                // the choice ended with the note
+        r.run(0.2);
+        CHECK(gated(r, 0, 48) == 1 && gated(r, 1, 48) == 0, "split CC 9: the next note on that channel goes by note again");
+    }
+
     // ---- layer: every finger plays both parts ----
     {
         Rig r("strings/cello");

@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,24 +74,7 @@ private fun PartCard(k: Int) {
     val title = partLabel(k, perf.layout).ifEmpty { "Playing" }
     SectionCard(title, accent = c) {
         if (perf.layout != 0) InstrumentRow(k, label = "")
-        Segmented(listOf("Play", "Arpeggiate"), if (p.arp) 1 else 0, accent = c) { i -> AppState.updatePart(k) { it.copy(arp = i == 1) } }
-        if (p.arp) {
-            Spacer(Modifier.height(12.dp))
-            Text("Order", color = TextDim, fontSize = 13.sp)
-            Chips(ARP_ORDERS, p.order, accent = c) { i -> AppState.updatePart(k) { it.copy(order = i) } }
-            Text("Rate", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-            Chips(ARP_RATES.map { it.first }, ARP_RATES.indexOfFirst { it.second == p.rate }, accent = c) { i ->
-                AppState.updatePart(k) { it.copy(rate = ARP_RATES[i].second) }
-            }
-            LabeledSlider("Gate", p.gate, 0.05f..1f, pct(p.gate), accent = c) { v -> AppState.updatePart(k) { it.copy(gate = v) } }
-            Text("Octaves", color = TextDim, fontSize = 13.sp)
-            Segmented(listOf("1", "2", "3", "4"), p.octaves - 1, accent = c) { i -> AppState.updatePart(k) { it.copy(octaves = i + 1) } }
-            SwitchRow("Latch", p.latch, "Keep playing after you lift your hand; a new chord replaces it", accent = c) { v ->
-                AppState.updatePart(k) { it.copy(latch = v) }
-            }
-            Text("Each arp note follows the finger that holds it: press to swell, slide to change the tone, wiggle for vibrato.",
-                 color = TextDim, fontSize = 12.sp)
-        }
+        ArpControls(k, c)
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Octave", modifier = Modifier.weight(1f))
@@ -179,5 +163,29 @@ fun SoundScreen() {
             LabeledSlider("Feedback", perf.delayFeedback, 0f..0.9f, pct(perf.delayFeedback)) { v -> AppState.update { it.copy(delayFeedback = v) } }
             SwitchRow("Ping-pong", perf.delayPingPong, "Echoes bounce between left and right") { v -> AppState.update { it.copy(delayPingPong = v) } }
         }
+    }
+}
+
+/** Play or arpeggiate, and the arp's settings, for part k. Also on the screen pad's rail. */
+@Composable
+fun ArpControls(k: Int, c: Color) {
+    val p = AppState.perf.part(k)
+    Segmented(listOf("Play", "Arpeggiate"), if (p.arp) 1 else 0, accent = c) { i -> AppState.updatePart(k) { it.copy(arp = i == 1) } }
+    if (p.arp) {
+        Spacer(Modifier.height(12.dp))
+        Text("Order", color = TextDim, fontSize = 13.sp)
+        Chips(ARP_ORDERS, p.order, accent = c) { i -> AppState.updatePart(k) { it.copy(order = i) } }
+        Text("Rate", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+        Chips(ARP_RATES.map { it.first }, ARP_RATES.indexOfFirst { it.second == p.rate }, accent = c) { i ->
+            AppState.updatePart(k) { it.copy(rate = ARP_RATES[i].second) }
+        }
+        LabeledSlider("Gate", p.gate, 0.05f..1f, pct(p.gate), accent = c) { v -> AppState.updatePart(k) { it.copy(gate = v) } }
+        Text("Octaves", color = TextDim, fontSize = 13.sp)
+        Segmented(listOf("1", "2", "3", "4"), p.octaves - 1, accent = c) { i -> AppState.updatePart(k) { it.copy(octaves = i + 1) } }
+        SwitchRow("Latch", p.latch, "Keep playing after you lift your hand; a new chord replaces it", accent = c) { v ->
+            AppState.updatePart(k) { it.copy(latch = v) }
+        }
+        Text("Each arp note follows the finger that holds it: press to swell, slide to change the tone, wiggle for vibrato.",
+             color = TextDim, fontSize = 12.sp)
     }
 }

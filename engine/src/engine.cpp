@@ -69,6 +69,7 @@ struct Engine::Channel {
     int noteOnCount = 0;
     float bend = 0, pressure = 0, slide = 0.5f, velocity = 0;
     float volume = 1;               // CC 7 on the finger's channel: a gain on its note (the screen pad's fade)
+    int force = 0;                  // CC 9 on the finger's channel: in a split, 1 = left part, 2 = right, 0 = by note
     int parts = 1;                  // bit p: this finger plays part p (fixed at note on)
     uint32_t order = 0;             // press order, for ArpOrder::AsPlayed
 };
@@ -186,7 +187,9 @@ void Engine::apply(const Msg& m) {
             c.noteOnCount++;
             c.order = ++pressCounter_;
             c.parts = perf_.layout == Layout::Layer ? 3
-                    : perf_.layout == Layout::Split ? (m.d1 < perf_.splitNote ? 1 : 2) : 1;
+                    : perf_.layout != Layout::Split ? 1
+                    : c.force == 1 || c.force == 2 ? c.force          // a split screen pad: its side's part
+                    : (m.d1 < perf_.splitNote ? 1 : 2);
             recentNotes_[recentPos_] = m.d1;
             recentPos_ = (recentPos_ + 1) % 16;
             recentCount_ = std::min(recentCount_ + 1, 16);
@@ -196,18 +199,20 @@ void Engine::apply(const Msg& m) {
         } else {
             c.note = -1;
             c.volume = 1;
+            c.force = 0;
         }
         return;
     case kNoteOff:
         // The volume is sent before the note on (so a faded note never starts loud) and lasts
         // until the note ends; the voice keeps the last value for its release.
-        if (ch != 0) { c.note = -1; c.volume = 1; }
+        if (ch != 0) { c.note = -1; c.volume = 1; c.force = 0; }
         return;
     case kPitchBend: c.bend = bend14(m) / 8192.f * bendRange_.load(); return;
     case kChanPress: c.pressure = m.d1 / 127.f; return;
     case kController:
         if (m.d1 == 74 && ch != 0) c.slide = m.d2 / 127.f;
         else if (m.d1 == 7 && ch != 0) c.volume = m.d2 / 127.f;
+        else if (m.d1 == 9 && ch != 0) c.force = m.d2;
         else if (m.d1 == 120 || m.d1 == 123) panicFlag_ = true;
         return;
     default: return;
@@ -677,7 +682,7 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
         if (any && (frameCounter_ - lastEventFrame_) * 1000 / sr_ > wd) doPanic = true;
     }
     if (doPanic) {
-        for (int ch = 0; ch < kChannels; ch++) { ch_[ch].note = -1; ch_[ch].pressure = 0; ch_[ch].bend = 0; ch_[ch].volume = 1; }
+        for (int ch = 0; ch < kChannels; ch++) { ch_[ch].note = -1; ch_[ch].pressure = 0; ch_[ch].bend = 0; ch_[ch].volume = 1; ch_[ch].force = 0; }
         for (int p = 0; p < 2; p++) { releasePart(p); parts_[p].latchCount = 0; }   // a latched arp stops too
         panics_++;
     }

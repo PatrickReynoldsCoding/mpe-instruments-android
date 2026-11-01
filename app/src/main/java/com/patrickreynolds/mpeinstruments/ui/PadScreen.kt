@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -59,6 +60,7 @@ import com.patrickreynolds.mpeinstruments.PadSettings
 import com.patrickreynolds.mpeinstruments.PhoneControl
 import com.patrickreynolds.mpeinstruments.PhoneMods
 import com.patrickreynolds.mpeinstruments.SCALES
+import com.patrickreynolds.mpeinstruments.ARP_ORDERS
 import com.patrickreynolds.mpeinstruments.noteName
 import kotlin.math.abs
 import kotlin.math.exp
@@ -79,10 +81,10 @@ fun PadScreen(onClose: () -> Unit) {
     val pad = remember { Pad() }
     var frame by remember { mutableIntStateOf(0) }
     var panel by remember { mutableStateOf<String?>(null) }
-    val s = AppState.pad
-    val inst = AppState.instrument(0)
-    val theme = padTheme(s)
-    pad.layout(s, inst?.centerNote ?: 60f, theme)
+    val split = AppState.perf.layout == 1
+    val side = if (split) AppState.padSide.coerceIn(0, 1) else 0
+    val theme = padTheme(AppState.pad)
+    pad.layout(AppState.pads, split, AppState.padSplitAt, FloatArray(2) { AppState.instrument(it)?.centerNote ?: 60f }, theme)
     DisposableEffect(Unit) { onDispose { pad.releaseAll() } }
     LaunchedEffect(Unit) {
         var last = 0L
@@ -96,7 +98,7 @@ fun PadScreen(onClose: () -> Unit) {
     }
     Box(Modifier.fillMaxSize().background(theme.bottom)) {
       Row(Modifier.fillMaxSize()) {
-        Rail(s, theme, inst?.name ?: "", panel, { panel = if (panel == it) null else it }, onClose)
+        Rail(side, split, theme, panel, { panel = if (panel == it) null else it }, onClose)
         Canvas(Modifier.weight(1f).fillMaxHeight().systemGestureExclusion()
             .pointerInput(Unit) {
                 awaitPointerEventScope {
@@ -109,7 +111,7 @@ fun PadScreen(onClose: () -> Unit) {
                             val x = c.position.x / size.width; val y = 1f - c.position.y / playH
                             when {
                                 c.pressed && !c.previousPressed ->
-                                    if (!AppState.pad.locked && c.position.y > size.height - strip) pad.grab(c.id.value, c.position.x / size.width)
+                                    if (c.position.y > size.height - strip) pad.stripDown(c.id.value, x, y)
                                     else pad.down(c.id.value, x, y)
                                 c.pressed -> pad.move(c.id.value, x, y)
                                 c.previousPressed -> pad.up(c.id.value)
@@ -124,12 +126,14 @@ fun PadScreen(onClose: () -> Unit) {
             pad.draw(this, STRIP.toPx())
         }
       }
-        panel?.let { SettingPanel(it, s, theme) { panel = null } }
+        panel?.let { SettingPanel(it, side, split, theme) { panel = null } }
     }
 }
 
 /** Height of the note strip along the bottom: drag it sideways to move the notes. */
 private val STRIP = 64.dp
+/** A touch on the note strip this close (dp) to a split's divide drags the divide. */
+private const val DIVIDE_GRAB_DP = 28f
 
 /** Vibrato: semitones per dp of wobble at the Normal depth and Medium sensitivity, before it rounds off. */
 private const val VIB_SEMIS_PER_DP = 0.08f
@@ -138,61 +142,101 @@ private val VIBRATO_NORMAL = PadSettings.VIBRATO_DEPTH[2]
 private const val VIB_STILL_DP = 0.4f
 /** A finger moving one way this fast (dp/s) is half sliding: its vibrato is let through 1/2. */
 private const val VIB_SLIDE_DPS = 40f
+/** Snap: a finger has to go this far (columns) past the edge of its column to change note, so a finger on the line does not flicker. */
+private const val SNAP_HOLD = 0.08f
 
-/** The settings rail at the left edge, Etherpad style: tap a setting to change it. */
+/**
+ * The settings rail at the left edge, Etherpad style: tap a setting to change it. With the pad
+ * split, the toggle at the top picks the pad (left or right) the settings below it change.
+ */
 @Composable
-private fun Rail(s: PadSettings, t: PadTheme, sound: String, open: String?, pick: (String) -> Unit, onClose: () -> Unit) {
+private fun Rail(side: Int, split: Boolean, t: PadTheme, open: String?, pick: (String) -> Unit, onClose: () -> Unit) {
+    val s = AppState.pads[side]
+    val part = AppState.perf.part(side)
+    val accent = t.parts[side]
     Column(Modifier.fillMaxHeight().width(92.dp).background(t.rail)
                .then(if (t.flat) Modifier.border(BorderStroke(2.dp, Color.Black)) else Modifier)
                .verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close", tint = t.railDim) }
+        if (split) SideToggle(side, t)
         val items = listOf(
-            "Sound" to sound,
+            "Sound" to (AppState.instrument(side)?.name ?: ""),
+            "Arp" to (if (part.arp) ARP_ORDERS[part.order.coerceIn(ARP_ORDERS.indices)] else "Off"),
             "Size" to "${s.size}",
             "Octave" to (if (s.octave == 0) "0" else "%+d".format(s.octave)),
             "Key" to NOTE_NAMES[s.key],
             "Scale" to (if (s.scale == 0) "All notes" else SCALES[s.scale].name),
             "Up/down" to PadSettings.VERTICAL[s.vertical],
+            "Glide" to PadSettings.glideName(s.glide),
+            "Vibrato" to PadSettings.VIBRATO[s.vibrato],
             // Experimental: on the rail once turned on in Setup (or while its panel is open here).
             "Tilt" to PhoneMods.TILT[AppState.mods.tilt],
             "Breath" to PhoneMods.BREATH[AppState.mods.breath],
-            "Glide" to if (s.snap) "Snap" else "Free",
-            "Vibrato" to PadSettings.VIBRATO[s.vibrato],
-            "Look" to if (Eink) "E-ink" else PAD_THEMES[s.theme].name,
+            "Look" to if (Eink) "E-ink" else PAD_THEMES[AppState.pad.theme].name,
         ).filter { (label, _) -> when (label) {
             "Tilt" -> AppState.mods.tilt != 0 || open == "Tilt"
             "Breath" -> AppState.mods.breath != 0 || open == "Breath"
             else -> true
         } }
-        for ((label, value) in items) RailItem(label, value, open == label, t) { pick(label) }
-        // Not a panel: one tap locks the note strip so a stray touch cannot move the notes.
-        RailItem(if (s.locked) "Locked" else "Lock", if (s.locked) "Strip plays" else "Strip moves", s.locked, t) {
-            AppState.updatePad { it.copy(locked = !it.locked) }
+        for ((label, value) in items) RailItem(label, value, open == label, t, accent) { pick(label) }
+        // Not panels: one tap each. Split makes two pads, each with its own sound and settings.
+        val layout = AppState.perf.layout
+        RailItem("Split", when (layout) { 1 -> "Two pads"; 2 -> "Layered"; else -> "One pad" }, split, t, accent) {
+            AppState.update { it.copy(layout = if (it.layout == 1) 0 else 1) }
+        }
+        // Lock: the note strip plays instead of moving the notes, so a stray touch cannot move them.
+        val locked = AppState.pad.locked
+        RailItem(if (locked) "Locked" else "Lock", if (locked) "Strip plays" else "Strip moves", locked, t, accent) {
+            AppState.updatePad(0) { it.copy(locked = !it.locked) }
+        }
+    }
+}
+
+/** Left or right: which pad of a split the rail changes. */
+@Composable
+private fun SideToggle(side: Int, t: PadTheme) {
+    Row(Modifier.padding(horizontal = 6.dp).fillMaxWidth().height(34.dp)
+            .border(BorderStroke(if (t.flat) 2.dp else 1.dp, if (t.flat) Color.Black else t.railDim), RoundedCornerShape(8.dp))) {
+        for (k in 0..1) {
+            val on = k == side
+            Box(Modifier.weight(1f).fillMaxHeight()
+                    .background(when { !on -> Color.Transparent; t.flat -> Color.Black; else -> t.parts[k].copy(alpha = 0.3f) },
+                                RoundedCornerShape(8.dp))
+                    .clickable { AppState.padSide = k },
+                contentAlignment = Alignment.Center) {
+                Text(if (k == 0) "Left" else "Right", fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                     color = when { on && t.flat -> Color.White; on -> t.parts[k]; else -> t.railText })
+            }
         }
     }
 }
 
 @Composable
-private fun RailItem(label: String, value: String, on: Boolean, t: PadTheme, click: () -> Unit) {
+private fun RailItem(label: String, value: String, on: Boolean, t: PadTheme, accent: Color, click: () -> Unit) {
     Column(Modifier.clickable(onClick = click)
                .then(if (on && t.flat) Modifier.background(Color.Black) else Modifier)
                .padding(horizontal = 4.dp, vertical = 2.dp),
            horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-             color = when { on && t.flat -> Color.White; on -> t.parts[0]; else -> t.railText })
+             color = when { on && t.flat -> Color.White; on -> accent; else -> t.railText })
         Text(value, fontSize = 10.sp, color = if (on && t.flat) Color.White else t.railDim, maxLines = 1)
     }
 }
 
 @Composable
-private fun SettingPanel(which: String, s: PadSettings, t: PadTheme, close: () -> Unit) {
+private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, close: () -> Unit) {
+    val s = AppState.pads[side]
+    val accent = if (Eink) Color.Black else PartColors[side]
+    fun set(change: (PadSettings) -> PadSettings) = AppState.updatePad(side, change)
     Surface(Modifier.padding(start = 100.dp, top = 12.dp, bottom = 12.dp).widthIn(max = 380.dp),
             shape = RoundedCornerShape(18.dp), color = if (t.flat) Color.White else Panel.copy(alpha = 0.96f), contentColor = Fg,
             border = if (t.flat) BorderStroke(Edge, Color.Black) else null) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(which, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                val shared = which in listOf("Look", "Tilt", "Breath")
+                Text(if (split && !shared) "$which · ${if (side == 0) "left" else "right"}" else which,
+                     fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 TextButton(onClick = close) { Text("Done") }
             }
             when (which) {
@@ -200,60 +244,73 @@ private fun SettingPanel(which: String, s: PadSettings, t: PadTheme, close: () -
                     for ((group, list) in AppState.instruments.groupBy { it.group }) {
                         item { Text(group.uppercase(), color = TextDim, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp)) }
                         for (i in list) item {
-                            val chosen = i.id == AppState.perf.part(0).instrument
-                            Text(i.name, fontSize = 16.sp, color = if (chosen) PartColors[0] else Color.Unspecified,
-                                 modifier = Modifier.clickable { AppState.updatePart(0) { it.copy(instrument = i.id) } }
+                            val chosen = i.id == AppState.perf.part(side).instrument
+                            Text(i.name, fontSize = 16.sp, color = if (chosen) PartColors[side] else Color.Unspecified,
+                                 modifier = Modifier.clickable { AppState.updatePart(side) { it.copy(instrument = i.id) } }
                                      .fillMaxWidth().padding(vertical = 7.dp))
                         }
                     }
                 }
-                "Size" -> Stepper("${s.size} notes across") { d -> AppState.updatePad { it.copy(size = (it.size + d).coerceIn(3, 24)) } }
+                "Arp" -> Column(Modifier.verticalScroll(rememberScrollState())) {
+                    ArpControls(side, accent)
+                    val bpm = AppState.perf.bpm
+                    LabeledSlider("Tempo", bpm, 40f..220f, "${bpm.roundToInt()} bpm", accent = accent) { v ->
+                        AppState.update { it.copy(bpm = v.roundToInt().toFloat()) } }
+                }
+                "Size" -> Stepper("${s.size} notes across") { d -> set { it.copy(size = (it.size + d).coerceIn(3, 24)) } }
                 "Octave" -> {
                     Stepper(if (s.octave == 0) "Middle of the instrument" else "%+d octaves".format(s.octave)) { d ->
-                        AppState.updatePad { it.copy(octave = (it.octave + d).coerceIn(-4, 4)) } }
-                    Text(if (s.locked) "The note strip is locked (Lock on the rail)."
+                        set { it.copy(octave = (it.octave + d).coerceIn(-4, 4)) } }
+                    Text(if (AppState.pad.locked) "The note strip is locked (Lock on the rail)."
                          else "Or drag the note strip along the bottom sideways.", color = TextDim, fontSize = 12.sp)
-                    if (s.shift != 0) TextButton(onClick = { AppState.updatePad { it.copy(shift = 0) } }) {
+                    if (s.shift != 0) TextButton(onClick = { set { it.copy(shift = 0) } }) {
                         Text("Move the notes back (%+d)".format(s.shift)) }
                 }
-                "Key" -> Chips(NOTE_NAMES, s.key) { k -> AppState.updatePad { it.copy(key = k) } }
-                "Scale" -> Chips(SCALES.map { if (it.mask == 0) "All notes" else it.name }, s.scale) { k ->
-                    AppState.updatePad { it.copy(scale = k) } }
+                "Key" -> Chips(NOTE_NAMES, s.key, accent) { k -> set { it.copy(key = k) } }
+                "Scale" -> Chips(SCALES.map { if (it.mask == 0) "All notes" else it.name }, s.scale, accent) { k ->
+                    set { it.copy(scale = k) } }
                 "Up/down" -> {
-                    Chips(PadSettings.VERTICAL, s.vertical) { k -> AppState.updatePad { it.copy(vertical = k) } }
+                    Chips(PadSettings.VERTICAL, s.vertical, accent) { k -> set { it.copy(vertical = k) } }
                     Text(when (s.vertical) {
                         1 -> "Higher up the screen is brighter. Loudness stays the same."
                         else -> "The height of a finger sets its loudness: the same height is always the same loudness."
                     }, color = TextDim, fontSize = 12.sp)
                     if (s.vertical != 1) {
                         Text("Fade to silence", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                        Chips(PadSettings.FADE, s.fade) { k -> AppState.updatePad { it.copy(fade = k) } }
+                        Chips(PadSettings.FADE, s.fade, accent) { k -> set { it.copy(fade = k) } }
                         Text(if (s.fade == 0) "The bottom edge is quiet but not silent."
                              else "The bottom edge is silent, so sliding down fades a note out. A longer fade spreads " +
                                   "it over more of the pad.", color = TextDim, fontSize = 12.sp)
                     }
                 }
                 "Look" -> {
+                    val p0 = AppState.pad
                     if (Eink) Text("E-ink is on (Setup tab), so the pad is black on white with no motion.",
                                    color = TextDim, fontSize = 12.sp)
-                    else Chips(PAD_THEMES.map { it.name }, s.theme) { k -> AppState.updatePad { it.copy(theme = k) } }
+                    else Chips(PAD_THEMES.map { it.name }, p0.theme) { k -> AppState.updatePad(0) { it.copy(theme = k) } }
                     Text("Lines", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                    Chips(PadSettings.LINES, s.lines) { k -> AppState.updatePad { it.copy(lines = k) } }
+                    Chips(PadSettings.LINES, p0.lines) { k -> AppState.updatePad(0) { it.copy(lines = k) } }
                 }
                 "Tilt", "Breath" -> Column(Modifier.verticalScroll(rememberScrollState())) {
                     val r = liveModReading()
                     if (which == "Tilt") TiltControls(r) else BreathControls(r)
                 }
                 "Glide" -> {
-                    Chips(listOf("Snap", "Free"), if (s.snap) 0 else 1) { k -> AppState.updatePad { it.copy(snap = k == 0) } }
-                    Text(if (s.snap) "A touch starts on the column's note, and a resting finger settles back onto it. Slide to glide."
-                         else "Pitch follows the finger exactly, like a fretless string.", color = TextDim, fontSize = 12.sp)
+                    LabeledSlider("Glide", s.glide, 0f..1f, PadSettings.glideName(s.glide), accent = accent, steps = 19) { v ->
+                        set { it.copy(glide = v) } }
+                    Text(when {
+                        s.glide <= 0.005f -> "Snap: each column plays its note, and a finger moving across goes straight " +
+                                             "from one note to the next, with no bend in between."
+                        s.glide >= 0.995f -> "Free: pitch follows the finger exactly, like a fretless string."
+                        else -> "The middle of each column plays its note; nearer the edges the pitch glides to the next. " +
+                                "Higher glides over more of the column."
+                    }, color = TextDim, fontSize = 12.sp)
                 }
                 "Vibrato" -> {
-                    Chips(PadSettings.VIBRATO, s.vibrato) { k -> AppState.updatePad { it.copy(vibrato = k) } }
+                    Chips(PadSettings.VIBRATO, s.vibrato, accent) { k -> set { it.copy(vibrato = k) } }
                     if (s.vibrato != 0) {
                         Text("Sensitivity", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                        Chips(PadSettings.VIB_SENSE, s.vibSense) { k -> AppState.updatePad { it.copy(vibSense = k) } }
+                        Chips(PadSettings.VIB_SENSE, s.vibSense, accent) { k -> set { it.copy(vibSense = k) } }
                     }
                     Text(if (s.vibrato == 0) "The pitch moves only as far as the finger does."
                          else "Rock a held finger from side to side: the small wobble is made bigger, so a vibrato " +
@@ -301,14 +358,40 @@ fun padTheme(s: PadSettings) = if (Eink) EINK_PAD else PAD_THEMES.getOrElse(s.th
 
 /**
  * Touches to MPE. Each finger gets a channel (16 down to 2, so a Seaboard on 2 up rarely
- * collides), a note from its column, and pitch bend for everything after: the glide, and in
- * Snap mode the pull back onto the note. A finger keeps the columns it went down on, so
- * dragging the note strip while holding a note does not bend it.
+ * collides), a note from its column, and pitch bend for everything after: the glide and the
+ * vibrato. A finger keeps the columns it went down on, so dragging the note strip while holding
+ * a note does not bend it. With the performance split there are two pads side by side, each
+ * playing its own part (the engine is told which with CC 9), whatever notes they cover.
  */
 private class Pad {
-    class Finger(val channel: Int, val note: Int, val cols: IntArray, var x: Float, var y: Float, var raw: Float) {
-        var offset = 0f            // pitch = raw + offset + vib; Snap sets it so the touch starts on the note
-        var speed = 0f             // decaying peak, semitones per second
+    /** One pad: its settings, where it sits across the screen (0..1), and its columns. */
+    class Zone(val part: Int) {
+        var s = PadSettings()
+        var x0 = 0f; var x1 = 1f
+        var columns = IntArray(8) { 60 + it }      // sounding note of each column
+        var shiftRange = 0..0
+        val w get() = (x1 - x0).coerceAtLeast(1e-3f)
+        fun local(x: Float) = (x - x0) / w
+        fun global(lx: Float) = x0 + lx * w
+
+        fun set(s: PadSettings, center: Float) {
+            this.s = s
+            val mask = SCALES[s.scale].mask.takeIf { it != 0 } ?: 0xFFF
+            val inScale = (0..127).filter { (mask shr (((it - s.key) % 12 + 12) % 12)) and 1 == 1 }
+            val want = center + 12 * s.octave
+            val k = inScale.indices.minByOrNull { abs(inScale[it] - want) } ?: 0
+            val base = k - s.size / 2
+            val last = (inScale.size - s.size).coerceAtLeast(0)
+            shiftRange = -base..(last - base)
+            val start = (base + s.shift).coerceIn(0, last)
+            columns = IntArray(s.size) { inScale.getOrElse(start + it) { 127 } }
+        }
+    }
+
+    class Finger(val channel: Int, val note: Int, val zone: Int, val cols: IntArray, var x: Float, var y: Float) {
+        // x is across the finger's own pad (0..1), and may go past its edges.
+        var base = 0f              // pitch from where the finger is
+        var col = -1               // Snap: the column it is playing
         // Vibrato: the finger's wobble around where it has been lately, made bigger.
         var centre = x             // x smoothed over ~0.12 s
         var drift = 0f             // x speed smoothed over ~0.15 s, dp/s: high while sliding
@@ -317,19 +400,19 @@ private class Pad {
         var bend = -1; var pressure = -1; var slide = -1; var volume = -1
         val trail = ArrayDeque<Offset>()
         var age = 0f
-        val pitch get() = raw + offset + vib
+        val pitch get() = base + vib
     }
     private class Ripple(val x: Float, val y: Float, val color: Color) { var age = 0f }
-    /** A finger dragging the note strip: where it started, and the shift then. */
-    private class Grab(val x: Float, val shift: Int)
+    /** A finger dragging a pad's note strip: where it started, and the shift then. */
+    private class Grab(val zone: Int, val x: Float, val shift: Int)
 
     private val fingers = HashMap<Long, Finger>()
     private val grabs = HashMap<Long, Grab>()
+    private var divider = -1L                          // the finger dragging a split's divide, or -1
     private val ripples = ArrayList<Ripple>()
-    private var columns = IntArray(8) { 60 + it }      // sounding note of each column
-    private var settings = PadSettings()
+    private var zones = listOf(Zone(0))
+    private var split = false
     var theme = PAD_THEMES[0]; private set
-    private var shiftRange = 0..0
     private val ext = FloatArray(16 * 5)
     private val lastExt = FloatArray(16 * 5)
     private var nExt = 0
@@ -337,38 +420,62 @@ private class Pad {
     /** Tilt and breath now, and which are on (read every frame while one is). */
     private var mod = ModReading()
     private var modsOn = PhoneMods()
-    /** Width of the pad in dp, so the vibrato is the same size of wiggle on every screen. */
+    /** Width of the playing area in dp, so the vibrato is the same size of wiggle on every screen. */
     var widthDp = 400f
+    /** The screen as a whole (theme, lines, lock): the left pad's settings. */
+    private val main get() = zones[0].s
 
     fun takeDirty() = dirty.also { dirty = false }
 
-    fun layout(s: PadSettings, center: Float, t: PadTheme) {
-        if (s != settings || t !== theme) dirty = true
-        settings = s; theme = t
-        val mask = SCALES[s.scale].mask.takeIf { it != 0 } ?: 0xFFF
-        val inScale = (0..127).filter { (mask shr (((it - s.key) % 12 + 12) % 12)) and 1 == 1 }
-        val want = center + 12 * s.octave
-        val k = inScale.indices.minByOrNull { abs(inScale[it] - want) } ?: 0
-        val base = k - s.size / 2
-        val last = (inScale.size - s.size).coerceAtLeast(0)
-        shiftRange = -base..(last - base)
-        val start = (base + s.shift).coerceIn(0, last)
-        columns = IntArray(s.size) { inScale.getOrElse(start + it) { 127 } }
+    fun layout(pads: List<PadSettings>, split: Boolean, at: Float, centers: FloatArray, t: PadTheme) {
+        val n = if (split) 2 else 1
+        if (n != zones.size) { releaseAll(); zones = List(n) { Zone(it) } }
+        val x1 = if (split) at else 1f
+        for ((k, z) in zones.withIndex()) {
+            val (a, b) = if (k == 0) 0f to x1 else x1 to 1f
+            if (z.s != pads[k] || z.x0 != a || z.x1 != b) dirty = true
+            z.x0 = a; z.x1 = b
+            z.set(pads[k], centers[k])
+        }
+        if (t !== theme || split != this.split) dirty = true
+        this.split = split; theme = t
     }
 
-    /** x (0..1 across) to sounding pitch: straight lines between the column notes. */
-    private fun pitchAt(cols: IntArray, x: Float): Float {
+    private fun zoneAt(x: Float) = if (split && x >= zones[1].x0) 1 else 0
+
+    /** x (0..1 across a pad) to sounding pitch, for a glide amount g (0 snap .. 1 free). */
+    private fun pitchAt(cols: IntArray, x: Float, g: Float): Float {
         val u = x * cols.size - 0.5f
         val i = floor(u).toInt().coerceIn(0, cols.size - 2)
-        return cols[i] + (u - i) * (cols[i + 1] - cols[i])
+        val t = u - i
+        // Free: straight lines between the column notes (and on past the end columns). Less glide:
+        // the middle of each column holds its note and the glide is squeezed towards the edges.
+        val r = if (g >= 0.995f) t else ((t - (1 - g) / 2) / g).coerceIn(0f, 1f)
+        return cols[i] + r * (cols[i + 1] - cols[i])
     }
     private fun columnAt(cols: IntArray, x: Float) = (x * cols.size - 0.5f).roundToInt().coerceIn(0, cols.lastIndex)
-    /** Sounding pitch back to x, for drawing (and for the Seaboard's fingers). */
-    private fun xOf(pitch: Float): Float {
+    /** Sounding pitch back to x across a pad, for drawing (and for the Seaboard's fingers). */
+    private fun xOf(z: Zone, pitch: Float): Float {
+        val c = z.columns
+        if (c.size < 2) return 0.5f
         var i = 0
-        while (i < columns.size - 2 && pitch > columns[i + 1]) i++
-        val span = (columns[i + 1] - columns[i]).coerceAtLeast(1)
-        return (i + (pitch - columns[i]) / span + 0.5f) / columns.size
+        while (i < c.size - 2 && pitch > c[i + 1]) i++
+        val span = (c[i + 1] - c[i]).coerceAtLeast(1)
+        return (i + (pitch - c[i]) / span + 0.5f) / c.size
+    }
+
+    /** Where the finger is to its pitch, by its pad's glide. Snap holds a note until the finger is clearly in the next column. */
+    private fun place(f: Finger) {
+        val g = (zones.getOrNull(f.zone) ?: return).s.glide
+        val n = f.cols.size
+        if (g <= 0.005f || n < 2) {
+            val u = f.x * n - 0.5f
+            if (f.col < 0 || abs(u - f.col) > 0.5f + SNAP_HOLD) f.col = u.roundToInt().coerceIn(0, n - 1)
+            f.base = f.cols[f.col].toFloat()
+        } else {
+            f.col = -1
+            f.base = pitchAt(f.cols, f.x, g)
+        }
     }
 
     private fun send(status: Int, d1: Int, d2: Int) = Native.nativeTouch(status, d1, d2)
@@ -377,53 +484,69 @@ private class Pad {
         dirty = true
         val used = fingers.values.map { it.channel }.toSet()
         val ch = (15 downTo 1).firstOrNull { it !in used } ?: return
-        val cols = columns
-        val col = columnAt(cols, x)
+        val zi = zoneAt(x)
+        val z = zones[zi]
+        val cols = z.columns
+        val lx = z.local(x)
+        val col = columnAt(cols, lx)
         // The engine adds the app's transpose (set for the Seaboard): take it off so the pad plays what it shows.
         val note = (cols[col] - AppState.transpose).coerceIn(0, 127)
         val y0 = y.coerceIn(0f, 1f)
-        val f = Finger(ch, note, cols, x, y0, pitchAt(cols, x))
-        if (settings.snap) f.offset = cols[col] - f.raw
+        val f = Finger(ch, note, zi, cols, lx, y0)
+        f.col = col
+        place(f)
         fingers[id] = f
-        // Order matters. The volume goes first, so a note low on the pad never starts loud. The
-        // engine clears bend and pressure at the note on (as for a Seaboard, whose pressure follows
-        // it), so they go after it: sent before, a tap played at zero pressure until the finger moved.
+        // Order matters. The volume goes first, so a note low on the pad never starts loud, and in a
+        // split the part this pad plays. The engine clears bend and pressure at the note on (as for a
+        // Seaboard, whose pressure follows it), so they go after it.
         val (p, _, vol) = expression(f)
         f.volume = (vol * 127).roundToInt().coerceIn(0, 127)
         send(0xB0 or ch, 7, f.volume)
+        if (split) send(0xB0 or ch, 9, z.part + 1)
         // The strike follows the height too. The engine multiplies velocity by 5 (the Block
         // strikes softly), so 127 / 5 is the hardest strike.
         send(0x90 or ch, note, (p * 127 / 5).roundToInt().coerceIn(1, 127))
         sendExpression(f)
-        if (!theme.flat) ripples += Ripple(x, y0, colorOf(note))
+        if (!theme.flat) ripples += Ripple(x, y0, colorOf(zi))
     }
 
-    /** A touch on the note strip: dragging it moves the notes, one column per column width. */
-    fun grab(id: Long, x: Float) { grabs[id] = Grab(x, settings.shift); dirty = true }
+    /**
+     * A touch on the note strip. Near a split's divide it drags the divide; elsewhere it drags
+     * that pad's notes sideways. Locked, the strip plays notes like the rest of the pad.
+     */
+    fun stripDown(id: Long, x: Float, y: Float) {
+        if (main.locked) { down(id, x, y); return }
+        if (split && abs(x - zones[1].x0) * widthDp < DIVIDE_GRAB_DP) { divider = id; dirty = true; return }
+        val zi = zoneAt(x)
+        grabs[id] = Grab(zi, x, zones[zi].s.shift); dirty = true
+    }
 
     fun move(id: Long, x: Float, y: Float) {
+        if (id == divider) { AppState.changePadSplit(x); return }
         grabs[id]?.let { g ->
-            val shift = (g.shift - ((x - g.x) * columns.size).roundToInt())
-                .coerceIn(shiftRange.first.coerceAtMost(g.shift), shiftRange.last.coerceAtLeast(g.shift))
-            if (shift != settings.shift) AppState.updatePad { it.copy(shift = shift) }
+            val z = zones.getOrNull(g.zone) ?: return
+            val shift = (g.shift - ((x - g.x) / z.w * z.columns.size).roundToInt())
+                .coerceIn(z.shiftRange.first.coerceAtMost(g.shift), z.shiftRange.last.coerceAtLeast(g.shift))
+            if (shift != z.s.shift) AppState.updatePad(z.part) { it.copy(shift = shift) }
             return
         }
         val f = fingers[id] ?: return
-        val raw = pitchAt(f.cols, x)
-        f.speed = maxOf(f.speed, abs(raw - f.raw) * 60f)    // per event, events come about once a frame
-        f.raw = raw; f.x = x; f.y = y.coerceIn(0f, 1f)
+        val z = zones.getOrNull(f.zone) ?: return
+        f.x = z.local(x); f.y = y.coerceIn(0f, 1f)
+        place(f)
         sendExpression(f)
         dirty = true
     }
 
     fun up(id: Long) {
+        if (id == divider) { divider = -1; dirty = true; return }
         if (grabs.remove(id) != null) { dirty = true; return }
         val f = fingers.remove(id) ?: return
         send(0x80 or f.channel, f.note, 64)
         dirty = true
     }
 
-    fun releaseAll() { grabs.clear(); for (id in fingers.keys.toList()) up(id) }
+    fun releaseAll() { grabs.clear(); divider = -1; for (id in fingers.keys.toList()) up(id) }
 
     fun tick(dt: Float) {
         modsOn = AppState.mods
@@ -432,16 +555,12 @@ private class Pad {
         mod = r
         for (f in fingers.values) {
             f.age += dt
-            f.speed *= exp(-dt / 0.06f)
-            // Resting (not gliding, not wobbling): pull onto the note of the column under the finger.
-            if (settings.snap && f.speed < 1.5f && dt > 0) {
-                val target = f.cols[columnAt(f.cols, f.x)] - f.raw
-                f.offset += (target - f.offset) * (1 - exp(-dt / 0.1f))
-            }
             if (dt > 0) vibrato(f, dt)
+            place(f)
             sendExpression(f)
             if (!theme.flat) {
-                f.trail.addLast(Offset(xOf(f.pitch + mod.bend), f.y))   // the trail shows a tilt's vibrato too
+                val z = zones.getOrNull(f.zone) ?: continue
+                f.trail.addLast(Offset(z.global(xOf(z, f.pitch + mod.bend)), f.y))   // the trail shows a tilt's vibrato too
                 if (f.trail.size > 28) f.trail.removeFirst()
             }
         }
@@ -460,28 +579,33 @@ private class Pad {
      * the slide. A tanh keeps a big wobble from going past the setting's depth.
      */
     private fun vibrato(f: Finger, dt: Float) {
-        val depth = PadSettings.VIBRATO_DEPTH.getOrElse(settings.vibrato) { 0f }
-        val v = (f.x - f.lastX) * widthDp / dt
+        val z = zones.getOrNull(f.zone) ?: return
+        val dpPerX = widthDp * z.w
+        val depth = PadSettings.VIBRATO_DEPTH.getOrElse(z.s.vibrato) { 0f }
+        val v = (f.x - f.lastX) * dpPerX / dt
         f.lastX = f.x
         f.drift += (v - f.drift) * (1 - exp(-dt / 0.15f))
-        f.centre += (f.x - f.centre) * (1 - exp(-dt / 0.12f))
-        if (depth == 0f) { f.vib = 0f; return }
-        val dev = (f.x - f.centre) * widthDp
-        val wobble = sign(dev) * (abs(dev) - VIB_STILL_DP).coerceAtLeast(0f)   // a still finger's jitter is not a vibrato
         val d = f.drift / VIB_SLIDE_DPS
         val notSliding = 1f / (1f + d * d * d * d)
-        val gain = VIB_SEMIS_PER_DP * PadSettings.VIB_SENSE_GAIN.getOrElse(settings.vibSense) { 1f }
+        // While sliding the centre keeps up with the finger, so when it stops there is no lag
+        // left over to be heard as a bend.
+        f.centre += (f.x - f.centre) * maxOf(1 - exp(-dt / 0.12f), 1 - notSliding)
+        if (depth == 0f) { f.vib = 0f; return }
+        val dev = (f.x - f.centre) * dpPerX
+        val wobble = sign(dev) * (abs(dev) - VIB_STILL_DP).coerceAtLeast(0f)   // a still finger's jitter is not a vibrato
+        val gain = VIB_SEMIS_PER_DP * PadSettings.VIB_SENSE_GAIN.getOrElse(z.s.vibSense) { 1f }
         f.vib = depth * tanh(wobble * notSliding * gain / VIBRATO_NORMAL)
     }
 
-    /** Pressure, slide (CC 74) and volume (CC 7) for a finger's height, by the Up/down setting. */
+    /** Pressure, slide (CC 74) and volume (CC 7) for a finger's height, by its pad's Up/down setting. */
     private fun expression(f: Finger): Triple<Float, Float, Float> {
+        val s = zones.getOrNull(f.zone)?.s ?: PadSettings()
         val y = f.y
         // The bottom of the pad is silent: the volume fades the last stretch, so every instrument
         // goes all the way to nothing (most have a floor at zero pressure, as a Seaboard key does).
-        val h = PadSettings.FADE_HEIGHT.getOrElse(settings.fade) { 0.25f }
+        val h = PadSettings.FADE_HEIGHT.getOrElse(s.fade) { 0.25f }
         val fade = if (h == 0f) 1f else (y / h).coerceIn(0f, 1f).let { it * it }
-        return when (settings.vertical) {
+        return when (s.vertical) {
             1 -> Triple(0.7f, y, 1f)
             2 -> Triple(y, 0.5f, fade)
             else -> Triple(y, y, fade)
@@ -502,44 +626,46 @@ private class Pad {
         if (pressure != f.pressure) { f.pressure = pressure; send(0xD0 or f.channel, pressure, 0) }
     }
 
-    /** Part colour of a note as sent: the engine splits on that. */
-    private fun colorOf(sentNote: Int): Color {
-        val p = AppState.perf
-        return theme.parts[if (p.layout == 1 && sentNote >= p.splitNote) 1 else 0]
-    }
+    /** A pad's colour: its part's. */
+    private fun colorOf(zone: Int) = theme.parts[zones.getOrNull(zone)?.part ?: 0]
 
-    private fun isRoot(n: Int) = ((n - settings.key) % 12 + 12) % 12 == 0
+    private fun isRoot(z: Zone, n: Int) = ((n - z.s.key) % 12 + 12) % 12 == 0
 
     fun draw(d: androidx.compose.ui.graphics.drawscope.DrawScope, strip: Float) = with(d) {
         val t = theme
         val w = size.width; val h = size.height
         val playH = h - strip
         if (t.flat) drawRect(t.top) else drawRect(Brush.verticalGradient(listOf(t.top, t.mid, t.bottom)))
-        val cw = w / columns.size
         // Soft, Clear, Bold: (line alpha, root line alpha, line width, root width, band alpha)
-        val (la, ra, lw, rw, ba) = when (settings.lines) {
+        val (la, ra, lw, rw, ba) = when (main.lines) {
             0 -> listOf(0.22f, 0.5f, 2f, 3f, 0f)
             2 -> listOf(0.75f, 1f, 4f, 7f, 0.10f)
             else -> listOf(0.45f, 0.85f, 3f, 5f, 0.05f)
         }
-        val held = fingers.values.map { columnAt(columns, xOf(it.pitch)) }.toSet()
-        for ((i, n) in columns.withIndex()) {
-            val x = (i + 0.5f) * cw
-            val c = colorOf(n - AppState.transpose)
-            // Every other column shaded, so it is easy to see which one a finger is in.
-            if (i % 2 == 1 && ba > 0f) drawRect(t.line.copy(alpha = ba), Offset(i * cw, 0f), Size(cw, playH))
-            if (i in held) {
-                if (t.flat) drawRect(Color(0xFFAAAAAA), Offset(i * cw, 0f), Size(cw, playH))
-                else drawRect(Brush.horizontalGradient(listOf(c.copy(alpha = 0f), c.copy(alpha = 0.2f), c.copy(alpha = 0f)),
-                                                       startX = x - cw / 2, endX = x + cw / 2),
-                              topLeft = Offset(x - cw / 2, 0f), size = Size(cw, playH))
+        val held = zones.map { z -> fingers.values.filter { zones.getOrNull(it.zone) === z }
+                                         .map { columnAt(z.columns, xOf(z, it.pitch)) }.toSet() }
+        for ((zi, z) in zones.withIndex()) {
+            val left = z.x0 * w
+            val cw = z.w * w / z.columns.size
+            val c = colorOf(zi)
+            for ((i, n) in z.columns.withIndex()) {
+                val x = left + (i + 0.5f) * cw
+                // Every other column shaded, so it is easy to see which one a finger is in.
+                if (i % 2 == 1 && ba > 0f) drawRect(t.line.copy(alpha = ba), Offset(left + i * cw, 0f), Size(cw, playH))
+                if (i in held[zi]) {
+                    if (t.flat) drawRect(Color(0xFFAAAAAA), Offset(left + i * cw, 0f), Size(cw, playH))
+                    else drawRect(Brush.horizontalGradient(listOf(c.copy(alpha = 0f), c.copy(alpha = 0.2f), c.copy(alpha = 0f)),
+                                                           startX = x - cw / 2, endX = x + cw / 2),
+                                  topLeft = Offset(x - cw / 2, 0f), size = Size(cw, playH))
+                }
+                val root = isRoot(z, n)
+                val lineColor = if (t.flat) Color.Black else if (root) c else t.line
+                drawLine(lineColor.copy(alpha = if (t.flat) 1f else if (root) ra else la), Offset(x, 0f), Offset(x, playH),
+                         strokeWidth = if (t.flat) (if (root) rw + 2f else lw) else if (root) rw else lw)
             }
-            val root = isRoot(n)
-            val lineColor = if (t.flat) Color.Black else if (root) c else t.line
-            drawLine(lineColor.copy(alpha = if (t.flat) 1f else if (root) ra else la), Offset(x, 0f), Offset(x, playH),
-                     strokeWidth = if (t.flat) (if (root) rw + 2f else lw) else if (root) rw else lw)
+            drawStrip(this, z, zi, strip, cw, held[zi])
         }
-        drawStrip(this, strip, cw, held)
+        if (split) drawDivide(this, zones[1].x0 * w, strip)
         // Breath: a glow rising from the bottom as you blow (on e-ink a bar along the bottom).
         if (modsOn.breath != 0 && mod.breath > 0.01f) {
             val b = mod.breath
@@ -559,17 +685,40 @@ private class Pad {
         for (i in 0 until nExt) {                           // a controller's fingers (ours are drawn below)
             val b = 5 * i
             if (ext[b].toInt() in mine) continue
-            orb(Offset(xOf(ext[b + 2] + mod.bend) * w, (1 - ext[b + 4]) * playH), loudness(ext[b + 3]), colorOf(ext[b + 1].toInt()))
+            // In a split a controller's note goes by the split point: draw it on that part's pad.
+            val zi = if (split && ext[b + 1].toInt() >= AppState.perf.splitNote) 1 else 0
+            val z = zones.getOrNull(zi) ?: zones[0]
+            orb(Offset(z.global(xOf(z, ext[b + 2] + mod.bend)) * w, (1 - ext[b + 4]) * playH), loudness(ext[b + 3]), colorOf(zi))
         }
         for (f in fingers.values) {
-            val c = colorOf(f.note)
+            val z = zones.getOrNull(f.zone) ?: continue
+            val c = colorOf(f.zone)
             for ((k, p) in f.trail.withIndex()) {
                 val a = (k + 1f) / f.trail.size
                 drawCircle(c.copy(alpha = 0.22f * a), radius = 8f + 26f * a, center = Offset(p.x * w, (1 - p.y) * playH))
             }
-            orb(Offset(xOf(f.pitch + mod.bend) * w, (1 - f.y) * playH), loudness(f.pressure / 127f), c)
+            orb(Offset(z.global(xOf(z, f.pitch + mod.bend)) * w, (1 - f.y) * playH), loudness(f.pressure / 127f), c)
         }
         drawHud(this, playH)
+    }
+
+    /** A split's divide: a line down the pad and, unlocked, a handle on the strip to drag it by. */
+    private fun drawDivide(d: androidx.compose.ui.graphics.drawscope.DrawScope, x: Float, strip: Float) = with(d) {
+        val t = theme
+        val h = size.height; val top = h - strip
+        val ink = if (t.flat) Color.Black else t.label
+        drawLine(ink.copy(alpha = if (t.flat) 1f else 0.6f), Offset(x, 0f), Offset(x, h), strokeWidth = if (t.flat) 4f else 3f)
+        if (main.locked) return@with
+        val hw = 14.dp.toPx(); val hh = strip * 0.7f
+        val y0 = top + (strip - hh) / 2
+        val dragging = divider != -1L
+        drawRoundRect(if (t.flat) Color.White else if (dragging) t.parts[0] else t.strip, Offset(x - hw, y0), Size(2 * hw, hh), CornerRadius(hw))
+        drawRoundRect(ink.copy(alpha = if (t.flat) 1f else 0.8f), Offset(x - hw, y0), Size(2 * hw, hh), CornerRadius(hw),
+                      style = Stroke(width = if (t.flat) 3f else 2f))
+        for (k in -1..1) {                                   // grip: three short lines across
+            val gx = x + k * 6.dp.toPx() / 1.5f
+            drawLine(ink.copy(alpha = if (t.flat) 1f else 0.7f), Offset(gx, y0 + hh * 0.3f), Offset(gx, y0 + hh * 0.7f), strokeWidth = 2f)
+        }
     }
 
     /** How big an orb is drawn: its pressure, or the breath when breath is the loudness (Swell). */
@@ -635,40 +784,42 @@ private class Pad {
         }
     }
 
-    /** The note names along the bottom. Unlocked it is a handle: drag sideways to move the notes. */
-    private fun drawStrip(d: androidx.compose.ui.graphics.drawscope.DrawScope, strip: Float, cw: Float, held: Set<Int>) = with(d) {
+    /** A pad's note names along the bottom. Unlocked it is a handle: drag sideways to move its notes. */
+    private fun drawStrip(d: androidx.compose.ui.graphics.drawscope.DrawScope, z: Zone, zi: Int, strip: Float, cw: Float,
+                          held: Set<Int>) = with(d) {
         val t = theme
         val w = size.width; val h = size.height; val top = h - strip
-        val dragging = grabs.isNotEmpty()
-        drawRect(if (dragging && !t.flat) t.parts[0].copy(alpha = 0.25f) else t.strip, Offset(0f, top), Size(w, strip))
-        drawLine(t.line.copy(alpha = if (t.flat) 1f else 0.5f), Offset(0f, top), Offset(w, top), strokeWidth = if (t.flat) 3f else 2f)
+        val left = z.x0 * w; val right = z.x1 * w
+        val dragging = grabs.values.any { it.zone == zi }
+        drawRect(if (dragging && !t.flat) colorOf(zi).copy(alpha = 0.25f) else t.strip, Offset(left, top), Size(right - left, strip))
+        drawLine(t.line.copy(alpha = if (t.flat) 1f else 0.5f), Offset(left, top), Offset(right, top), strokeWidth = if (t.flat) 3f else 2f)
         val paint = android.graphics.Paint().apply {
             isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER
             textSize = (strip * 0.36f).coerceAtMost(cw * 0.42f)
         }
         val canvas = drawContext.canvas.nativeCanvas
-        for ((i, n) in columns.withIndex()) {
-            val x = (i + 0.5f) * cw
-            val root = isRoot(n)
-            if (i in held && t.flat) drawRect(Color.Black, Offset(i * cw, top), Size(cw, strip))
-            if (i > 0) drawLine(t.label.copy(alpha = if (t.flat) 0.6f else 0.18f), Offset(i * cw, top + strip * 0.2f),
-                                Offset(i * cw, h - strip * 0.2f), strokeWidth = 2f)
+        for ((i, n) in z.columns.withIndex()) {
+            val x = left + (i + 0.5f) * cw
+            val root = isRoot(z, n)
+            if (i in held && t.flat) drawRect(Color.Black, Offset(left + i * cw, top), Size(cw, strip))
+            if (i > 0) drawLine(t.label.copy(alpha = if (t.flat) 0.6f else 0.18f), Offset(left + i * cw, top + strip * 0.2f),
+                                Offset(left + i * cw, h - strip * 0.2f), strokeWidth = 2f)
             paint.color = when {
                 i in held && t.flat -> android.graphics.Color.WHITE
                 t.flat -> android.graphics.Color.BLACK
-                root -> colorOf(n - AppState.transpose).toArgb()
+                root -> colorOf(zi).toArgb()
                 else -> t.label.copy(alpha = 0.85f).toArgb()
             }
             paint.isFakeBoldText = root
             canvas.drawText(noteName(n), x, top + strip * 0.62f, paint)
         }
-        // Grip marks at both ends while the strip can be dragged.
-        if (!settings.locked) {
+        // Grip marks at the pad's outer ends while the strip can be dragged (a split's divide has its own handle).
+        if (!main.locked) {
             val g = t.label.copy(alpha = if (t.flat) 1f else 0.45f)
             for (k in 0..2) {
                 val y = top + strip * (0.38f + 0.12f * k)
-                drawLine(g, Offset(8f, y), Offset(26f, y), strokeWidth = 2f)
-                drawLine(g, Offset(w - 26f, y), Offset(w - 8f, y), strokeWidth = 2f)
+                if (zi == 0) drawLine(g, Offset(left + 8f, y), Offset(left + 26f, y), strokeWidth = 2f)
+                if (zi == zones.lastIndex) drawLine(g, Offset(right - 26f, y), Offset(right - 8f, y), strokeWidth = 2f)
             }
         }
     }

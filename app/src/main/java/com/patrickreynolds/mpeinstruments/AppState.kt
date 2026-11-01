@@ -38,9 +38,16 @@ object AppState {
         private set
     /** Set the split point from the next note played. */
     var learningSplit by mutableStateOf(false)
-    /** The on-screen pad's layout; not part of a preset. */
-    var pad by mutableStateOf(PadSettings())
+    /** The on-screen pads (left and right when split); not part of a preset. */
+    var pads by mutableStateOf(listOf(PadSettings(), PadSettings()))
         private set
+    /** The left pad, which also holds the settings of the screen as a whole (theme, lines, lock). */
+    val pad get() = pads[0]
+    /** Where a split pad divides the screen, 0..1 across the playing area. */
+    var padSplitAt by mutableStateOf(0.5f)
+        private set
+    /** Which pad of a split the rail is changing: 0 left, 1 right. */
+    var padSide by mutableStateOf(0)
 
     /** Tilt and breath: the phone as a controller; not part of a preset. */
     var mods by mutableStateOf(PhoneMods())
@@ -66,7 +73,10 @@ object AppState {
         presetName = prefs.getString("preset", "") ?: ""
         eink = prefs.getBoolean("eink", false)
         palette = if (eink) EinkPalette else DarkPalette
-        pad = runCatching { PadSettings.from(prefs.getString("pad", null)?.let { JSONObject(it) }) }.getOrDefault(PadSettings())
+        val p0 = runCatching { PadSettings.from(prefs.getString("pad", null)?.let { JSONObject(it) }) }.getOrDefault(PadSettings())
+        val p1 = runCatching { PadSettings.from(prefs.getString("pad2", null)?.let { JSONObject(it) }, p0.copy(shift = 0)) }.getOrDefault(p0)
+        pads = listOf(p0, p1)
+        padSplitAt = prefs.getFloat("padSplitAt", 0.5f).coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN)
         mods = runCatching { PhoneMods.from(prefs.getString("mods", null)?.let { JSONObject(it) }) }.getOrDefault(PhoneMods())
         userPresets = runCatching {
             val a = JSONArray(prefs.getString("presets", "[]"))
@@ -138,10 +148,20 @@ object AppState {
     }
     private val saveMods = Runnable { prefs.edit().putString("mods", mods.json().toString()).apply() }
 
-    fun updatePad(change: (PadSettings) -> PadSettings) {
-        pad = change(pad)
-        prefs.edit().putString("pad", pad.json().toString()).apply()
+    /** Change one pad: 0 left (or the only one), 1 right. */
+    fun updatePad(side: Int = 0, change: (PadSettings) -> PadSettings) {
+        val now = change(pads[side])
+        if (now == pads[side]) return
+        pads = pads.mapIndexed { k, p -> if (k == side) now else p }
+        prefs.edit().putString(if (side == 0) "pad" else "pad2", now.json().toString()).apply()
     }
+
+    fun changePadSplit(at: Float) {
+        padSplitAt = at.coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN)
+        saver.removeCallbacks(savePadSplit)
+        saver.postDelayed(savePadSplit, 400)
+    }
+    private val savePadSplit = Runnable { prefs.edit().putFloat("padSplitAt", padSplitAt).apply() }
 
     // ---- presets ----------------------------------------------------------------------------
 
@@ -206,3 +226,6 @@ val BUILT_IN_PRESETS = listOf(
     preset("Vibraphone, latched", Perf(bpm = 90f, parts = two(
         Part("struck/vibraphone", arp = true, order = 3, rate = 3f, gate = 0.8f, latch = true, reverb = 0.4f)))),
 )
+
+/** The narrowest a pad of a split can be, as a fraction of the screen. */
+const val PAD_SPLIT_MIN = 0.2f

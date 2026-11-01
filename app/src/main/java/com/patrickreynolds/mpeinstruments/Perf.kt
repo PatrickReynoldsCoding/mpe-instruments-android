@@ -1,6 +1,7 @@
 package com.patrickreynolds.mpeinstruments
 
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 /** One part (left or right of a split, or a layer): mirrors mpe::PartConfig. */
 data class Part(
@@ -96,14 +97,19 @@ data class Perf(
     }
 }
 
-/** The on-screen pad: columns of notes left to right, up and down for loudness and tone. */
+/**
+ * One on-screen pad: columns of notes left to right, up and down for loudness and tone. With the
+ * performance split, the screen has two, left and right, each with its own settings; theme,
+ * lines and locked belong to the screen as a whole and are kept in the left one.
+ */
 data class PadSettings(
     val size: Int = 8,             // columns (notes) across the screen
     val octave: Int = 0,           // 0 = the middle of the instrument's range
     val key: Int = 0,              // 0 = C
     val scale: Int = 1,            // index into SCALES; 0 (Off) plays every semitone
     val vertical: Int = 0,         // up/down: 0 loudness and tone, 1 tone, 2 loudness
-    val snap: Boolean = true,      // start on the column's note and settle back to it when resting
+    val glide: Float = 0f,         // 0 = snap: each column plays its note, straight from one to the next;
+                                   // 1 = free: pitch follows the finger exactly; between, glides near the column edges
     val shift: Int = 0,            // columns moved by dragging the note strip (scale steps)
     val locked: Boolean = false,   // the note strip plays notes instead of moving them
     val theme: Int = 0,            // index into PAD_THEMES (the e-ink look overrides it)
@@ -114,7 +120,7 @@ data class PadSettings(
 ) {
     fun json() = JSONObject().apply {
         put("size", size); put("octave", octave); put("key", key); put("scale", scale)
-        put("vertical", vertical); put("snap", snap); put("shift", shift); put("locked", locked)
+        put("vertical", vertical); put("glide", glide.toDouble()); put("shift", shift); put("locked", locked)
         put("theme", theme); put("lines", lines); put("vibrato", vibrato)
         put("vibSense", vibSense); put("fade", fade)
     }
@@ -122,6 +128,7 @@ data class PadSettings(
     companion object {
         val VERTICAL = listOf("Loudness + tone", "Tone", "Loudness")
         val LINES = listOf("Soft", "Clear", "Bold")
+        fun glideName(g: Float) = when { g <= 0.005f -> "Snap"; g >= 0.995f -> "Free"; else -> "${(g * 100).roundToInt()}%" }
         val VIBRATO = listOf("Off", "Light", "Normal", "Wide")
         /** Widest vibrato (semitones each way) of each VIBRATO setting. */
         val VIBRATO_DEPTH = listOf(0f, 0.25f, 0.5f, 1f)
@@ -134,7 +141,9 @@ data class PadSettings(
         fun from(o: JSONObject?, d: PadSettings = PadSettings()) = if (o == null) d else PadSettings(
             o.optInt("size", d.size).coerceIn(3, 24), o.optInt("octave", d.octave).coerceIn(-4, 4),
             o.optInt("key", d.key).coerceIn(0, 11), o.optInt("scale", d.scale).coerceIn(SCALES.indices),
-            o.optInt("vertical", d.vertical).coerceIn(0, 2), o.optBoolean("snap", d.snap),
+            o.optInt("vertical", d.vertical).coerceIn(0, 2),
+            // Before 0.9 glide was Snap or Free.
+            (if (o.has("glide")) o.optDouble("glide", 0.0).toFloat() else if (o.optBoolean("snap", true)) 0f else 1f).coerceIn(0f, 1f),
             o.optInt("shift", d.shift).coerceIn(-128, 128), o.optBoolean("locked", d.locked),
             o.optInt("theme", d.theme).coerceIn(0, 9), o.optInt("lines", d.lines).coerceIn(0, 2),
             o.optInt("vibrato", d.vibrato).coerceIn(VIBRATO.indices),
