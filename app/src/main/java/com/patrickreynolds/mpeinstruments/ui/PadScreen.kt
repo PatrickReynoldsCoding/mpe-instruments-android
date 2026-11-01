@@ -64,10 +64,13 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.roundToInt
+import kotlin.math.sign
+import kotlin.math.tanh
 
 /**
  * The screen as an instrument: columns of notes left to right, each finger its own MPE voice.
- * Slide sideways to glide, up for louder and brighter. The notes go into the engine through
+ * Slide sideways to glide, up for louder and brighter (the bottom edge is silent), rock a finger
+ * for vibrato. The notes go into the engine through
  * the same parser as the Seaboard's (Native.nativeTouch), so the arp, split and effects all
  * apply. A Seaboard played at the same time shows here too.
  */
@@ -101,6 +104,7 @@ fun PadScreen(onClose: () -> Unit) {
                         val e = awaitPointerEvent()
                         val strip = STRIP.toPx()
                         val playH = (size.height - strip).coerceAtLeast(1f)
+                        pad.widthDp = size.width / density
                         for (c in e.changes) {
                             val x = c.position.x / size.width; val y = 1f - c.position.y / playH
                             when {
@@ -127,6 +131,14 @@ fun PadScreen(onClose: () -> Unit) {
 /** Height of the note strip along the bottom: drag it sideways to move the notes. */
 private val STRIP = 64.dp
 
+/** Vibrato: semitones per dp of wobble at the Normal depth and Medium sensitivity, before it rounds off. */
+private const val VIB_SEMIS_PER_DP = 0.08f
+private val VIBRATO_NORMAL = PadSettings.VIBRATO_DEPTH[2]
+/** Wobble smaller than this (dp) is a still finger's jitter. */
+private const val VIB_STILL_DP = 0.4f
+/** A finger moving one way this fast (dp/s) is half sliding: its vibrato is let through 1/2. */
+private const val VIB_SLIDE_DPS = 40f
+
 /** The settings rail at the left edge, Etherpad style: tap a setting to change it. */
 @Composable
 private fun Rail(s: PadSettings, t: PadTheme, sound: String, open: String?, pick: (String) -> Unit, onClose: () -> Unit) {
@@ -146,6 +158,7 @@ private fun Rail(s: PadSettings, t: PadTheme, sound: String, open: String?, pick
             "Tilt" to PhoneMods.TILT[AppState.mods.tilt],
             "Breath" to PhoneMods.BREATH[AppState.mods.breath],
             "Glide" to if (s.snap) "Snap" else "Free",
+            "Vibrato" to PadSettings.VIBRATO[s.vibrato],
             "Look" to if (Eink) "E-ink" else PAD_THEMES[s.theme].name,
         ).filter { (label, _) -> when (label) {
             "Tilt" -> AppState.mods.tilt != 0 || open == "Tilt"
@@ -208,7 +221,17 @@ private fun SettingPanel(which: String, s: PadSettings, t: PadTheme, close: () -
                     AppState.updatePad { it.copy(scale = k) } }
                 "Up/down" -> {
                     Chips(PadSettings.VERTICAL, s.vertical) { k -> AppState.updatePad { it.copy(vertical = k) } }
-                    Text("Higher up the screen is louder and brighter.", color = TextDim, fontSize = 12.sp)
+                    Text(when (s.vertical) {
+                        1 -> "Higher up the screen is brighter. Loudness stays the same."
+                        else -> "The height of a finger sets its loudness: the same height is always the same loudness."
+                    }, color = TextDim, fontSize = 12.sp)
+                    if (s.vertical != 1) {
+                        Text("Fade to silence", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                        Chips(PadSettings.FADE, s.fade) { k -> AppState.updatePad { it.copy(fade = k) } }
+                        Text(if (s.fade == 0) "The bottom edge is quiet but not silent."
+                             else "The bottom edge is silent, so sliding down fades a note out. A longer fade spreads " +
+                                  "it over more of the pad.", color = TextDim, fontSize = 12.sp)
+                    }
                 }
                 "Look" -> {
                     if (Eink) Text("E-ink is on (Setup tab), so the pad is black on white with no motion.",
@@ -225,6 +248,16 @@ private fun SettingPanel(which: String, s: PadSettings, t: PadTheme, close: () -
                     Chips(listOf("Snap", "Free"), if (s.snap) 0 else 1) { k -> AppState.updatePad { it.copy(snap = k == 0) } }
                     Text(if (s.snap) "A touch starts on the column's note, and a resting finger settles back onto it. Slide to glide."
                          else "Pitch follows the finger exactly, like a fretless string.", color = TextDim, fontSize = 12.sp)
+                }
+                "Vibrato" -> {
+                    Chips(PadSettings.VIBRATO, s.vibrato) { k -> AppState.updatePad { it.copy(vibrato = k) } }
+                    if (s.vibrato != 0) {
+                        Text("Sensitivity", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                        Chips(PadSettings.VIB_SENSE, s.vibSense) { k -> AppState.updatePad { it.copy(vibSense = k) } }
+                    }
+                    Text(if (s.vibrato == 0) "The pitch moves only as far as the finger does."
+                         else "Rock a held finger from side to side: the small wobble is made bigger, so a vibrato " +
+                              "needs only a roll of the fingertip. Higher sensitivity needs a smaller roll. Slides are left alone.", color = TextDim, fontSize = 12.sp)
                 }
             }
         }
@@ -274,12 +307,17 @@ fun padTheme(s: PadSettings) = if (Eink) EINK_PAD else PAD_THEMES.getOrElse(s.th
  */
 private class Pad {
     class Finger(val channel: Int, val note: Int, val cols: IntArray, var x: Float, var y: Float, var raw: Float) {
-        var offset = 0f            // pitch = raw + offset; Snap sets it so the touch starts on the note
+        var offset = 0f            // pitch = raw + offset + vib; Snap sets it so the touch starts on the note
         var speed = 0f             // decaying peak, semitones per second
-        var bend = -1; var pressure = -1; var slide = -1
+        // Vibrato: the finger's wobble around where it has been lately, made bigger.
+        var centre = x             // x smoothed over ~0.12 s
+        var drift = 0f             // x speed smoothed over ~0.15 s, dp/s: high while sliding
+        var lastX = x
+        var vib = 0f               // semitones
+        var bend = -1; var pressure = -1; var slide = -1; var volume = -1
         val trail = ArrayDeque<Offset>()
         var age = 0f
-        val pitch get() = raw + offset
+        val pitch get() = raw + offset + vib
     }
     private class Ripple(val x: Float, val y: Float, val color: Color) { var age = 0f }
     /** A finger dragging the note strip: where it started, and the shift then. */
@@ -299,6 +337,8 @@ private class Pad {
     /** Tilt and breath now, and which are on (read every frame while one is). */
     private var mod = ModReading()
     private var modsOn = PhoneMods()
+    /** Width of the pad in dp, so the vibrato is the same size of wiggle on every screen. */
+    var widthDp = 400f
 
     fun takeDirty() = dirty.also { dirty = false }
 
@@ -345,8 +385,16 @@ private class Pad {
         val f = Finger(ch, note, cols, x, y0, pitchAt(cols, x))
         if (settings.snap) f.offset = cols[col] - f.raw
         fingers[id] = f
+        // Order matters. The volume goes first, so a note low on the pad never starts loud. The
+        // engine clears bend and pressure at the note on (as for a Seaboard, whose pressure follows
+        // it), so they go after it: sent before, a tap played at zero pressure until the finger moved.
+        val (p, _, vol) = expression(f)
+        f.volume = (vol * 127).roundToInt().coerceIn(0, 127)
+        send(0xB0 or ch, 7, f.volume)
+        // The strike follows the height too. The engine multiplies velocity by 5 (the Block
+        // strikes softly), so 127 / 5 is the hardest strike.
+        send(0x90 or ch, note, (p * 127 / 5).roundToInt().coerceIn(1, 127))
         sendExpression(f)
-        send(0x90 or ch, note, (40 + 80 * y0).roundToInt().coerceIn(1, 127))
         if (!theme.flat) ripples += Ripple(x, y0, colorOf(note))
     }
 
@@ -390,6 +438,7 @@ private class Pad {
                 val target = f.cols[columnAt(f.cols, f.x)] - f.raw
                 f.offset += (target - f.offset) * (1 - exp(-dt / 0.1f))
             }
+            if (dt > 0) vibrato(f, dt)
             sendExpression(f)
             if (!theme.flat) {
                 f.trail.addLast(Offset(xOf(f.pitch + mod.bend), f.y))   // the trail shows a tilt's vibrato too
@@ -404,17 +453,50 @@ private class Pad {
         if (nExt == 0 && lastExt[0] != -1f) { dirty = true; lastExt[0] = -1f }
     }
 
+    /**
+     * A small side-to-side wobble of a resting finger, made bigger. The wobble is the finger's
+     * distance from where it has been over the last ~0.12 s; while the finger slides (it keeps
+     * moving one way) that distance is a lag, not a wobble, so it is let through less the faster
+     * the slide. A tanh keeps a big wobble from going past the setting's depth.
+     */
+    private fun vibrato(f: Finger, dt: Float) {
+        val depth = PadSettings.VIBRATO_DEPTH.getOrElse(settings.vibrato) { 0f }
+        val v = (f.x - f.lastX) * widthDp / dt
+        f.lastX = f.x
+        f.drift += (v - f.drift) * (1 - exp(-dt / 0.15f))
+        f.centre += (f.x - f.centre) * (1 - exp(-dt / 0.12f))
+        if (depth == 0f) { f.vib = 0f; return }
+        val dev = (f.x - f.centre) * widthDp
+        val wobble = sign(dev) * (abs(dev) - VIB_STILL_DP).coerceAtLeast(0f)   // a still finger's jitter is not a vibrato
+        val d = f.drift / VIB_SLIDE_DPS
+        val notSliding = 1f / (1f + d * d * d * d)
+        val gain = VIB_SEMIS_PER_DP * PadSettings.VIB_SENSE_GAIN.getOrElse(settings.vibSense) { 1f }
+        f.vib = depth * tanh(wobble * notSliding * gain / VIBRATO_NORMAL)
+    }
+
+    /** Pressure, slide (CC 74) and volume (CC 7) for a finger's height, by the Up/down setting. */
+    private fun expression(f: Finger): Triple<Float, Float, Float> {
+        val y = f.y
+        // The bottom of the pad is silent: the volume fades the last stretch, so every instrument
+        // goes all the way to nothing (most have a floor at zero pressure, as a Seaboard key does).
+        val h = PadSettings.FADE_HEIGHT.getOrElse(settings.fade) { 0.25f }
+        val fade = if (h == 0f) 1f else (y / h).coerceIn(0f, 1f).let { it * it }
+        return when (settings.vertical) {
+            1 -> Triple(0.7f, y, 1f)
+            2 -> Triple(y, 0.5f, fade)
+            else -> Triple(y, y, fade)
+        }
+    }
+
     private fun sendExpression(f: Finger) {
         val range = AppState.bendRange.coerceAtLeast(1f)
         val semis = f.pitch - (f.note + AppState.transpose)
         val bend = (8192 + semis / range * 8192).roundToInt().coerceIn(0, 16383)
-        val (p, sl) = when (settings.vertical) {
-            1 -> 0.7f to f.y
-            2 -> (0.15f + 0.85f * f.y) to 0.5f
-            else -> (0.25f + 0.75f * f.y) to f.y
-        }
+        val (p, sl, vol) = expression(f)
         val pressure = (p * 127).roundToInt().coerceIn(0, 127)
         val slide = (sl * 127).roundToInt().coerceIn(0, 127)
+        val volume = (vol * 127).roundToInt().coerceIn(0, 127)
+        if (volume != f.volume) { f.volume = volume; send(0xB0 or f.channel, 7, volume) }
         if (bend != f.bend) { f.bend = bend; send(0xE0 or f.channel, bend and 0x7F, bend shr 7) }
         if (slide != f.slide) { f.slide = slide; send(0xB0 or f.channel, 74, slide) }
         if (pressure != f.pressure) { f.pressure = pressure; send(0xD0 or f.channel, pressure, 0) }

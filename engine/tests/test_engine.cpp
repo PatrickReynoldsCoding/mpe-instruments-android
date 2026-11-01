@@ -144,6 +144,23 @@ int main() {
         CHECK(rms(r.run(0.3), 0, size_t(0.3 * kSr)) > 0.005, "held note restarts on the new instrument");
         CHECK(!r.engine.setInstrument(-1) && !r.engine.setInstrument(9999), "bad instrument index is refused");
     }
+    {   // per-finger volume (CC 7 on the finger's channel): sent before the note, it fades the note
+        // to silence; it lasts only until the note ends
+        auto level = [](int vol) {
+            Rig r("synths/lead");
+            if (vol >= 0) r.send(0xB1, 7, vol);
+            r.noteOn(1, 60, 90); r.press(1, 64);
+            return rms(r.run(0.5), size_t(0.2 * kSr), size_t(0.5 * kSr));
+        };
+        const double full = level(-1), half = level(64), none = level(0);
+        CHECK(full > 0.01, "lead plays at the default volume (rms %.4f)", full);
+        CHECK(std::fabs(half / full - 64 / 127.0) < 0.05, "CC 7 scales the note (%.3f of full)", half / full);
+        CHECK(none < 1e-5, "CC 7 at 0 is silent, from the first sample (rms %.6f)", none);
+        Rig r("synths/lead");
+        r.send(0xB1, 7, 0); r.noteOn(1, 60, 90); r.press(1, 64); r.run(0.1); r.noteOff(1, 60); r.run(0.5);
+        r.noteOn(1, 60, 90); r.press(1, 64);
+        CHECK(rms(r.run(0.5), size_t(0.2 * kSr), size_t(0.5 * kSr)) > 0.01, "the next note on that channel is back at full volume");
+    }
     {   // latency bookkeeping: a message that arrived 5 ms before the block started
         Rig r("strings/cello");
         const uint8_t press[2] = {0xD1, 10};

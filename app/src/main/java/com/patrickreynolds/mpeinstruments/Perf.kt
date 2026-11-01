@@ -108,22 +108,37 @@ data class PadSettings(
     val locked: Boolean = false,   // the note strip plays notes instead of moving them
     val theme: Int = 0,            // index into PAD_THEMES (the e-ink look overrides it)
     val lines: Int = 1,            // how strongly the columns are drawn: 0 soft, 1 clear, 2 bold
+    val vibrato: Int = 2,          // a small wiggle of the finger made bigger: index into VIBRATO
+    val vibSense: Int = 1,         // how small a wiggle makes the full vibrato: index into VIB_SENSE
+    val fade: Int = 2,             // how much of the bottom of the pad fades to silence: index into FADE
 ) {
     fun json() = JSONObject().apply {
         put("size", size); put("octave", octave); put("key", key); put("scale", scale)
         put("vertical", vertical); put("snap", snap); put("shift", shift); put("locked", locked)
-        put("theme", theme); put("lines", lines)
+        put("theme", theme); put("lines", lines); put("vibrato", vibrato)
+        put("vibSense", vibSense); put("fade", fade)
     }
 
     companion object {
         val VERTICAL = listOf("Loudness + tone", "Tone", "Loudness")
         val LINES = listOf("Soft", "Clear", "Bold")
+        val VIBRATO = listOf("Off", "Light", "Normal", "Wide")
+        /** Widest vibrato (semitones each way) of each VIBRATO setting. */
+        val VIBRATO_DEPTH = listOf(0f, 0.25f, 0.5f, 1f)
+        val VIB_SENSE = listOf("Low", "Medium", "High", "Very high")
+        /** Vibrato per dp of wiggle, times the Medium amount. */
+        val VIB_SENSE_GAIN = listOf(0.5f, 1f, 2f, 4f)
+        val FADE = listOf("None", "Short", "Medium", "Long", "Whole pad")
+        /** Fraction of the pad's height, from the bottom, over which a note fades to silence. */
+        val FADE_HEIGHT = listOf(0f, 0.1f, 0.25f, 0.5f, 1f)
         fun from(o: JSONObject?, d: PadSettings = PadSettings()) = if (o == null) d else PadSettings(
             o.optInt("size", d.size).coerceIn(3, 24), o.optInt("octave", d.octave).coerceIn(-4, 4),
             o.optInt("key", d.key).coerceIn(0, 11), o.optInt("scale", d.scale).coerceIn(SCALES.indices),
             o.optInt("vertical", d.vertical).coerceIn(0, 2), o.optBoolean("snap", d.snap),
             o.optInt("shift", d.shift).coerceIn(-128, 128), o.optBoolean("locked", d.locked),
-            o.optInt("theme", d.theme).coerceIn(0, 9), o.optInt("lines", d.lines).coerceIn(0, 2))
+            o.optInt("theme", d.theme).coerceIn(0, 9), o.optInt("lines", d.lines).coerceIn(0, 2),
+            o.optInt("vibrato", d.vibrato).coerceIn(VIBRATO.indices),
+            o.optInt("vibSense", d.vibSense).coerceIn(VIB_SENSE.indices), o.optInt("fade", d.fade).coerceIn(FADE.indices))
     }
 }
 

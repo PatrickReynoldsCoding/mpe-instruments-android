@@ -68,6 +68,7 @@ struct Engine::Channel {
     int note = -1;                  // -1 = no note held
     int noteOnCount = 0;
     float bend = 0, pressure = 0, slide = 0.5f, velocity = 0;
+    float volume = 1;               // CC 7 on the finger's channel: a gain on its note (the screen pad's fade)
     int parts = 1;                  // bit p: this finger plays part p (fixed at note on)
     uint32_t order = 0;             // press order, for ArpOrder::AsPlayed
 };
@@ -80,6 +81,7 @@ struct Engine::Voice {
     int releasedSamples = 1 << 30;  // samples since this voice's gate closed
     int seen = 0;                   // play mode: the finger's noteOnCount already handled
     float bend = 0, pressure = 0, slide = 0.5f, velocity = 0;   // last expression from the finger
+    float volume = 1, volumeS = 1;
     float freq = 440, pitch = 0, pressureS = 0, slideS = 0.5f, level = 0;
     float pull = 0, prevPitch = 0, speed = 0;   // pitch assist
     int quietSamples = 0;
@@ -94,7 +96,7 @@ struct Engine::Part {
     double nextStep = 0;            // frame of the next arp step
     int64_t gateOff = INT64_MAX;
     uint32_t step = 0;
-    struct Entry { int finger, noteOn, note; float bend, pressure, slide, velocity; uint32_t order; };
+    struct Entry { int finger, noteOn, note; float bend, pressure, slide, velocity, volume; uint32_t order; };
     Entry latch[kChannels];         // the last chord held, for latch
     int latchCount = 0;
 };
@@ -193,15 +195,19 @@ void Engine::apply(const Msg& m) {
             noteCenter_ = double(sum) / recentCount_;
         } else {
             c.note = -1;
+            c.volume = 1;
         }
         return;
     case kNoteOff:
-        if (ch != 0) c.note = -1;
+        // The volume is sent before the note on (so a faded note never starts loud) and lasts
+        // until the note ends; the voice keeps the last value for its release.
+        if (ch != 0) { c.note = -1; c.volume = 1; }
         return;
     case kPitchBend: c.bend = bend14(m) / 8192.f * bendRange_.load(); return;
     case kChanPress: c.pressure = m.d1 / 127.f; return;
     case kController:
         if (m.d1 == 74 && ch != 0) c.slide = m.d2 / 127.f;
+        else if (m.d1 == 7 && ch != 0) c.volume = m.d2 / 127.f;
         else if (m.d1 == 120 || m.d1 == 123) panicFlag_ = true;
         return;
     default: return;
@@ -265,7 +271,7 @@ void Engine::stepArp(int p, int64_t frame) {
     for (int ch = 1; ch < kChannels; ch++) {
         const Channel& f = ch_[ch];
         if (f.note >= 0 && (f.parts >> p & 1))
-            set[n++] = {ch, f.noteOnCount, f.note, f.bend, f.pressure, f.slide, f.velocity, f.order};
+            set[n++] = {ch, f.noteOnCount, f.note, f.bend, f.pressure, f.slide, f.velocity, f.volume, f.order};
     }
     if (n) { std::copy(set, set + n, P.latch); P.latchCount = n; }
     else if (cfg.latch && P.latchCount) { n = P.latchCount; std::copy(P.latch, P.latch + n, set); }
@@ -282,7 +288,7 @@ void Engine::stepArp(int p, int64_t frame) {
         v.finger = e.finger;
         v.fingerNoteOn = e.noteOn;
         v.note = e.note + 12 * octave;
-        v.bend = e.bend; v.pressure = e.pressure; v.slide = e.slide; v.velocity = e.velocity;
+        v.bend = e.bend; v.pressure = e.pressure; v.slide = e.slide; v.velocity = e.velocity; v.volume = e.volume;
         v.gate = true;
         v.start = true;
         v.started = frame;
@@ -428,7 +434,7 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
         // Expression: from the finger while it still holds this note, else the last values.
         if (v.finger > 0) {
             const Channel& f = ch_[v.finger];
-            if (f.noteOnCount == v.fingerNoteOn && f.note >= 0) { v.bend = f.bend; v.pressure = f.pressure; v.slide = f.slide; }
+            if (f.noteOnCount == v.fingerNoteOn && f.note >= 0) { v.bend = f.bend; v.pressure = f.pressure; v.slide = f.slide; v.volume = f.volume; }
         }
         const float target = v.note + transpose + v.bend;
         // The phone's tilt and breath. Tilt bends after pitch assist, so a deliberate bend or
@@ -450,6 +456,7 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
             v.freq = noteToHz(v.pitch);
             v.pressureS = pressT;
             v.slideS = slideT;
+            v.volumeS = v.volume;
             sl.d->instanceClear();                               // so `gate > gate'` sees a clean 0 -> 1
         }
         if (!v.sounding) continue;
@@ -484,7 +491,14 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
             voiceResets_++;
             continue;
         }
-        for (int k = 0; k < n; k++) { mixL[k] += bufL[k] * gain; mixR[k] += r[k] * gain; }
+        // The finger's volume, ramped across the block so a fade has no steps.
+        const float g0 = v.volumeS;
+        if (v.gate) v.volumeS = smoothTo(v.volumeS, v.volume, cPress);
+        const float dg = (v.volumeS - g0) / n;
+        for (int k = 0; k < n; k++) {
+            const float g = gain * (g0 + dg * (k + 1));
+            mixL[k] += bufL[k] * g; mixR[k] += r[k] * g;
+        }
         v.level = smoothTo(v.level, std::sqrt(e / (2 * n)), 0.2f);
         if (!v.gate) v.quietSamples = (v.level < 3e-5f) ? v.quietSamples + n : 0;
         if (!v.gate && v.quietSamples > quietLimit) v.sounding = false;     // fully decayed
@@ -663,7 +677,7 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
         if (any && (frameCounter_ - lastEventFrame_) * 1000 / sr_ > wd) doPanic = true;
     }
     if (doPanic) {
-        for (int ch = 0; ch < kChannels; ch++) { ch_[ch].note = -1; ch_[ch].pressure = 0; ch_[ch].bend = 0; }
+        for (int ch = 0; ch < kChannels; ch++) { ch_[ch].note = -1; ch_[ch].pressure = 0; ch_[ch].bend = 0; ch_[ch].volume = 1; }
         for (int p = 0; p < 2; p++) { releasePart(p); parts_[p].latchCount = 0; }   // a latched arp stops too
         panics_++;
     }
