@@ -51,12 +51,28 @@ foreach(rel ${DSP_FILES})
             "${MPE_INSTRUMENTS_DIR}/instruments/${rel}"
     DEPENDS "${MPE_INSTRUMENTS_DIR}/instruments/${rel}" ${MPE_LIBS}
     COMMENT "faust ${id}")
+  # An instrument that defines `post` (the stage all its voices share) gets it compiled too.
+  set(dsp "${MPE_INSTRUMENTS_DIR}/instruments/${rel}")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${dsp}")
+  file(STRINGS "${dsp}" has_post REGEX "^post *=")
   set(wrap "${GEN_DIR}/${fn}_entry.cpp")
-  file(WRITE "${wrap}" "#define GEN \"${gen}\"\n#define CLASS ${cls}\n#define FN ${fn}\n#include \"${CMAKE_CURRENT_SOURCE_DIR}/src/instrument_entry.cpp\"\n")
-  set_source_files_properties("${wrap}" PROPERTIES OBJECT_DEPENDS "${gen}"
+  set(deps "${gen}")
+  set(postdefs "")
+  if(has_post)
+    set(pgen "${GEN_DIR}/${fn}.post.cpp")
+    add_custom_command(
+      OUTPUT "${pgen}"
+      COMMAND ${FAUST_EXECUTABLE} -I "${MPE_INSTRUMENTS_DIR}/lib" -lang cpp -i -vec -vs 32 -pn post -cn ${cls}_post -o "${pgen}" "${dsp}"
+      DEPENDS "${dsp}" ${MPE_LIBS}
+      COMMENT "faust ${id} (post)")
+    set(postdefs "#define GENPOST \"${pgen}\"\n#define CLASSPOST ${cls}_post\n")
+    list(APPEND deps "${pgen}")
+  endif()
+  file(WRITE "${wrap}" "#define GEN \"${gen}\"\n#define CLASS ${cls}\n#define FN ${fn}\n${postdefs}#include \"${CMAKE_CURRENT_SOURCE_DIR}/src/instrument_entry.cpp\"\n")
+  set_source_files_properties("${wrap}" PROPERTIES OBJECT_DEPENDS "${deps}"
                               COMPILE_FLAGS "-w -I${FAUST_INCLUDE_DIR}")
   list(APPEND INSTR_SOURCES "${wrap}")
-  string(APPEND REG_DECL "dsp* mpe_create_${fn}();\nconst char* mpe_meta_${fn}(const char*);\n")
+  string(APPEND REG_DECL "dsp* mpe_create_${fn}();\nconst char* mpe_meta_${fn}(const char*);\ndsp* mpe_create_post_${fn}();\n")
 endforeach()
 
 # Effects from engine/fx/*.dsp: compiled like the instruments, but not in the instrument table.
@@ -83,7 +99,7 @@ foreach(rel ${DSP_FILES})
   get_filename_component(stem "${rel}" NAME_WE)
   string(REGEX REPLACE "[^A-Za-z0-9]" "_" fn "${grp}_${stem}")
   string(APPEND REG "  { const char* n = mpe_meta_${fn}(\"name\"); const char* d = mpe_meta_${fn}(\"description\");\n")
-  string(APPEND REG "    v.push_back({ \"${grp}/${stem}\", \"${grp}\", n[0] ? n : \"${stem}\", d, mpe_create_${fn}, mpe_meta_${fn} }); }\n")
+  string(APPEND REG "    v.push_back({ \"${grp}/${stem}\", \"${grp}\", n[0] ? n : \"${stem}\", d, mpe_create_${fn}, mpe_meta_${fn}, mpe_create_post_${fn} }); }\n")
 endforeach()
 string(APPEND REG "  return v;\n}\nconst InstrumentInfo* instruments(int& count) {\n  static const std::vector<InstrumentInfo> all = build();\n  count = (int)all.size();\n  return all.data();\n}\nint findInstrument(const char* id) {\n  int n = 0; const InstrumentInfo* a = instruments(n);\n  for (int i = 0; i < n; i++) if (std::strcmp(a[i].id, id) == 0) return i;\n  return -1;\n}\n}  // namespace mpe\n")
 file(WRITE "${GEN_DIR}/registry.cpp.tmp" "${REG}")

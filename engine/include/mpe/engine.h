@@ -25,6 +25,7 @@ struct InstrumentInfo {
     const char* description;
     dsp* (*create)();
     const char* (*meta)(const char* key);   // a `declare <key> "<value>"` from the .dsp, or ""
+    dsp* (*createPost)();      // the stage all the voices share (an instrument body), or null
 };
 const InstrumentInfo* instruments(int& count);
 int findInstrument(const char* id);                 // index, or -1

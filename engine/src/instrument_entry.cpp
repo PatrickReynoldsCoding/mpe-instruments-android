@@ -1,6 +1,7 @@
 // Wraps one generated Faust instrument. Built once per .dsp with
 //   GEN   path of the generated C++        CLASS  its Faust class name
 //   FN    C identifier for this instrument (strings_cello)
+//   GENPOST, CLASSPOST: the instrument's `post` (the stage all voices share), if it has one
 #include <map>
 #include <string>
 #include "faust/dsp/dsp.h"
@@ -10,11 +11,19 @@
 #error "build with -DGEN=... -DCLASS=... -DFN=..."
 #endif
 #include GEN
+#ifdef GENPOST
+#include GENPOST
+#endif
 
 #define JOIN2(a, b) a##b
 #define JOIN(a, b) JOIN2(a, b)
 
 dsp* JOIN(mpe_create_, FN)() { return new CLASS(); }
+#ifdef GENPOST
+dsp* JOIN(mpe_create_post_, FN)() { return new CLASSPOST(); }
+#else
+dsp* JOIN(mpe_create_post_, FN)() { return nullptr; }
+#endif
 
 // Value of a `declare <key> "<value>";` line in the .dsp, or "" if absent.
 const char* JOIN(mpe_meta_, FN)(const char* key) {

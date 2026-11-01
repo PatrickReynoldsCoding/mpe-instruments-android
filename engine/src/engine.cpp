@@ -31,7 +31,14 @@ struct InstrumentSet {
     int index;
     int outputs = 1;
     Slot slots[kChannels];
+    dsp* post = nullptr;            // the stage all voices share (an instrument body), if any
+    int postOutputs = 1;
+    int postQuiet = 0;              // samples of silence in and out of post (skipped when long)
     InstrumentSet(int idx, const InstrumentInfo& info, int sr) : index(idx) {
+        if (info.createPost && (post = info.createPost())) {
+            post->init(sr);
+            postOutputs = std::min(2, post->getNumOutputs());
+        }
         for (int ch = 1; ch < kChannels; ch++) {
             Slot& s = slots[ch];
             s.d = info.create();
@@ -46,7 +53,7 @@ struct InstrumentSet {
             outputs = std::min(2, s.d->getNumOutputs());
         }
     }
-    ~InstrumentSet() { for (Slot& s : slots) delete s.d; }
+    ~InstrumentSet() { for (Slot& s : slots) delete s.d; delete post; }
 };
 
 // ---- fingers, parts and voices -----------------------------------------------------------
@@ -481,6 +488,25 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
         v.level = smoothTo(v.level, std::sqrt(e / (2 * n)), 0.2f);
         if (!v.gate) v.quietSamples = (v.level < 3e-5f) ? v.quietSamples + n : 0;
         if (!v.gate && v.quietSamples > quietLimit) v.sounding = false;     // fully decayed
+    }
+    // One body for all the part's notes, as on a real instrument (lib/mpe.lib `post`).
+    if (InstrumentSet* S = P.set; S->post) {
+        float in = 0;
+        for (int k = 0; k < n; k++) in += mixL[k] * mixL[k];
+        if (in > 1e-14f || S->postQuiet < sr_) {
+            float* pin[1] = { mixL };
+            float* pout[2] = { bufL, bufR };
+            S->post->compute(n, pin, pout);
+            const float* r = S->postOutputs > 1 ? bufR : bufL;
+            float out = 0;
+            for (int k = 0; k < n; k++) out += bufL[k] * bufL[k];
+            if (!std::isfinite(out) || out > 1e6f) { S->post->instanceClear(); out = 0; std::fill(bufL, bufL + n, 0.f); r = bufL; voiceResets_++; }
+            S->postQuiet = (in > 1e-14f || out > 1e-12f) ? 0 : S->postQuiet + n;
+            for (int k = 0; k < n; k++) { mixL[k] = bufL[k]; mixR[k] = r[k]; }
+        } else {
+            std::fill(mixL, mixL + n, 0.f);
+            std::fill(mixR, mixR + n, 0.f);
+        }
     }
 }
 
