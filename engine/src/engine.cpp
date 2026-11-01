@@ -23,7 +23,8 @@ struct Slot {
     dsp* d = nullptr;
     MapUI ui;
     // A control is null when the instrument does not use it (Faust drops unused ones).
-    FAUSTFLOAT *freq = nullptr, *gate = nullptr, *pressure = nullptr, *slide = nullptr, *velocity = nullptr;
+    FAUSTFLOAT *freq = nullptr, *gate = nullptr, *pressure = nullptr, *slide = nullptr, *velocity = nullptr,
+               *legato = nullptr;
 };
 
 struct InstrumentSet {
@@ -41,6 +42,7 @@ struct InstrumentSet {
             s.pressure = s.ui.getParamZone("pressure");
             s.slide = s.ui.getParamZone("slide");
             s.velocity = s.ui.getParamZone("velocity");
+            s.legato = s.ui.getParamZone("legato");
             outputs = std::min(2, s.d->getNumOutputs());
         }
     }
@@ -67,6 +69,8 @@ struct Engine::Voice {
     int finger = -1, fingerNoteOn = 0;        // the finger it follows (arp: while that note is held)
     int note = -1;                  // base note, octave offset included
     bool gate = false, sounding = false, start = false;
+    bool legato = false;            // this note started while another of the part was sounding (a slur)
+    int releasedSamples = 1 << 30;  // samples since this voice's gate closed
     int seen = 0;                   // play mode: the finger's noteOnCount already handled
     float bend = 0, pressure = 0, slide = 0.5f, velocity = 0;   // last expression from the finger
     float freq = 440, pitch = 0, pressureS = 0, slideS = 0.5f, level = 0;
@@ -394,6 +398,7 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
     auto coef = [&](float tau) { return 1.f - std::exp(-dt / tau); };
     const float cFreq = coef(0.004f), cPress = coef(0.012f), cSlide = coef(0.02f);
     const int quietLimit = int(0.4f * sr_);
+    const int legatoSamples = int(0.08f * sr_);                 // a note ended less than 80 ms ago still counts
     float inBuf[kMaxBlock] = {0}, bufL[kMaxBlock], bufR[kMaxBlock];
     float* ins[1] = { inBuf };
 
@@ -412,6 +417,7 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
             }
             v.gate = mine && f.note >= 0;
         }
+        v.releasedSamples = v.gate ? 0 : std::min(v.releasedSamples + n, 1 << 30);
         // Expression: from the finger while it still holds this note, else the last values.
         if (v.finger > 0) {
             const Channel& f = ch_[v.finger];
@@ -425,6 +431,9 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
 
         if (v.start) {                                           // a new note on this voice
             v.start = false;
+            v.legato = false;                                    // slurred: another note held or just ended
+            for (int k = 1; k < kChannels; k++)
+                if (k != i && (P.v[k].gate || P.v[k].releasedSamples < legatoSamples)) v.legato = true;
             v.sounding = true;
             v.quietSamples = 0;
             v.prevPitch = target;
@@ -452,6 +461,7 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
         if (sl.pressure) *sl.pressure = curve == 1.f ? v.pressureS : std::pow(v.pressureS, std::min(std::max(curve, 0.2f), 4.f));
         if (sl.slide) *sl.slide = v.slideS;
         if (sl.velocity) *sl.velocity = std::min(1.f, v.velocity * velScale);
+        if (sl.legato) *sl.legato = v.legato ? 1.f : 0.f;
 
         float* outs[2] = { bufL, bufR };
         sl.d->compute(n, ins, outs);
