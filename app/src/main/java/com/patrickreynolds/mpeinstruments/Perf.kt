@@ -117,12 +117,13 @@ data class PadSettings(
     val vibrato: Int = 2,          // a small wiggle of the finger made bigger: index into VIBRATO
     val vibSense: Int = 1,         // how small a wiggle makes the full vibrato: index into VIB_SENSE
     val fade: Int = 2,             // how much of the bottom of the pad fades to silence: index into FADE
+    val hideRail: Boolean = false, // the settings rail is tucked away (the screen as a whole: left pad only)
 ) {
     fun json() = JSONObject().apply {
         put("size", size); put("octave", octave); put("key", key); put("scale", scale)
         put("vertical", vertical); put("glide", glide.toDouble()); put("shift", shift); put("locked", locked)
         put("theme", theme); put("lines", lines); put("vibrato", vibrato)
-        put("vibSense", vibSense); put("fade", fade)
+        put("vibSense", vibSense); put("fade", fade); put("hideRail", hideRail)
     }
 
     companion object {
@@ -147,7 +148,8 @@ data class PadSettings(
             o.optInt("shift", d.shift).coerceIn(-128, 128), o.optBoolean("locked", d.locked),
             o.optInt("theme", d.theme).coerceIn(0, 9), o.optInt("lines", d.lines).coerceIn(0, 2),
             o.optInt("vibrato", d.vibrato).coerceIn(VIBRATO.indices),
-            o.optInt("vibSense", d.vibSense).coerceIn(VIB_SENSE.indices), o.optInt("fade", d.fade).coerceIn(FADE.indices))
+            o.optInt("vibSense", d.vibSense).coerceIn(VIB_SENSE.indices), o.optInt("fade", d.fade).coerceIn(FADE.indices),
+            o.optBoolean("hideRail", d.hideRail))
     }
 }
 

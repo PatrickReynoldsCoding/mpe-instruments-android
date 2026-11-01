@@ -131,38 +131,14 @@ fun SoundScreen() {
     Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 10.dp)) {
         val parts = if (perf.layout == 0) listOf(0) else listOf(0, 1)
         for (k in parts) {
-            val p = perf.part(k)
             val c = PartColors[k]
             val name = AppState.instrument(k)?.name ?: ""
             SectionCard(listOf(partLabel(k, perf.layout), name).filter { it.isNotEmpty() }.joinToString(" · "), accent = c) {
-                LabeledSlider("Brightness", p.brightness, 0f..1f, if (p.brightness >= 0.999f) "open" else pct(p.brightness), accent = c) { v ->
-                    AppState.updatePart(k) { it.copy(brightness = v) }
-                }
-                LabeledSlider("Drive", p.drive, 0f..1f, if (p.drive < 0.01f) "clean" else pct(p.drive), accent = c) { v ->
-                    AppState.updatePart(k) { it.copy(drive = v) }
-                }
-                // Slider left = sensitive (curve < 1), right = firm (curve > 1), on a log scale.
-                val pos = (kotlin.math.ln(p.pressureCurve) / kotlin.math.ln(3f)).coerceIn(-1f, 1f)
-                LabeledSlider("Touch", pos, -1f..1f,
-                              when { pos < -0.15f -> "light"; pos > 0.15f -> "firm"; else -> "even" }, accent = c) { v ->
-                    AppState.updatePart(k) { it.copy(pressureCurve = Math.pow(3.0, v.toDouble()).toFloat()) }
-                }
-                LabeledSlider("Reverb", p.reverb, 0f..1f, pct(p.reverb), accent = c) { v -> AppState.updatePart(k) { it.copy(reverb = v) } }
-                LabeledSlider("Delay", p.delay, 0f..1f, pct(p.delay), accent = c) { v -> AppState.updatePart(k) { it.copy(delay = v) } }
+                PartEffects(k, c)
             }
         }
-        SectionCard("Reverb") {
-            LabeledSlider("Size", perf.reverbSize, 0f..1f, pct(perf.reverbSize)) { v -> AppState.update { it.copy(reverbSize = v) } }
-            LabeledSlider("Damping", perf.reverbDamp, 0f..1f, pct(perf.reverbDamp)) { v -> AppState.update { it.copy(reverbDamp = v) } }
-        }
-        SectionCard("Delay") {
-            Text("Time, in beats of the tempo (${perf.bpm.roundToInt()} bpm)", color = TextDim, fontSize = 13.sp)
-            Chips(DELAY_TIMES.map { it.first }, DELAY_TIMES.indexOfFirst { it.second == perf.delayBeats }) { i ->
-                AppState.update { it.copy(delayBeats = DELAY_TIMES[i].second) }
-            }
-            LabeledSlider("Feedback", perf.delayFeedback, 0f..0.9f, pct(perf.delayFeedback)) { v -> AppState.update { it.copy(delayFeedback = v) } }
-            SwitchRow("Ping-pong", perf.delayPingPong, "Echoes bounce between left and right") { v -> AppState.update { it.copy(delayPingPong = v) } }
-        }
+        SectionCard("Reverb") { ReverbControls() }
+        SectionCard("Delay") { DelayControls() }
     }
 }
 
@@ -188,4 +164,44 @@ fun ArpControls(k: Int, c: Color) {
         Text("Each arp note follows the finger that holds it: press to swell, slide to change the tone, wiggle for vibrato.",
              color = TextDim, fontSize = 12.sp)
     }
+}
+
+/** One part's sound: brightness, drive, touch, and how much of it goes to the reverb and delay. Also on the screen pad. */
+@Composable
+fun PartEffects(k: Int, c: Color) {
+    val p = AppState.perf.part(k)
+    LabeledSlider("Brightness", p.brightness, 0f..1f, if (p.brightness >= 0.999f) "open" else pct(p.brightness), accent = c) { v ->
+        AppState.updatePart(k) { it.copy(brightness = v) }
+    }
+    LabeledSlider("Drive", p.drive, 0f..1f, if (p.drive < 0.01f) "clean" else pct(p.drive), accent = c) { v ->
+        AppState.updatePart(k) { it.copy(drive = v) }
+    }
+    // Slider left = sensitive (curve < 1), right = firm (curve > 1), on a log scale.
+    val pos = (kotlin.math.ln(p.pressureCurve) / kotlin.math.ln(3f)).coerceIn(-1f, 1f)
+    LabeledSlider("Touch", pos, -1f..1f,
+                  when { pos < -0.15f -> "light"; pos > 0.15f -> "firm"; else -> "even" }, accent = c) { v ->
+        AppState.updatePart(k) { it.copy(pressureCurve = Math.pow(3.0, v.toDouble()).toFloat()) }
+    }
+    LabeledSlider("Reverb", p.reverb, 0f..1f, pct(p.reverb), accent = c) { v -> AppState.updatePart(k) { it.copy(reverb = v) } }
+    LabeledSlider("Delay", p.delay, 0f..1f, pct(p.delay), accent = c) { v -> AppState.updatePart(k) { it.copy(delay = v) } }
+}
+
+/** The shared reverb. Also on the screen pad. */
+@Composable
+fun ReverbControls() {
+    val perf = AppState.perf
+    LabeledSlider("Size", perf.reverbSize, 0f..1f, pct(perf.reverbSize)) { v -> AppState.update { it.copy(reverbSize = v) } }
+    LabeledSlider("Damping", perf.reverbDamp, 0f..1f, pct(perf.reverbDamp)) { v -> AppState.update { it.copy(reverbDamp = v) } }
+}
+
+/** The shared delay. Also on the screen pad. */
+@Composable
+fun DelayControls() {
+    val perf = AppState.perf
+    Text("Time, in beats of the tempo (${perf.bpm.roundToInt()} bpm)", color = TextDim, fontSize = 13.sp)
+    Chips(DELAY_TIMES.map { it.first }, DELAY_TIMES.indexOfFirst { it.second == perf.delayBeats }) { i ->
+        AppState.update { it.copy(delayBeats = DELAY_TIMES[i].second) }
+    }
+    LabeledSlider("Feedback", perf.delayFeedback, 0f..0.9f, pct(perf.delayFeedback)) { v -> AppState.update { it.copy(delayFeedback = v) } }
+    SwitchRow("Ping-pong", perf.delayPingPong, "Echoes bounce between left and right") { v -> AppState.update { it.copy(delayPingPong = v) } }
 }

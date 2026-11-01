@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -96,9 +99,10 @@ fun PadScreen(onClose: () -> Unit) {
             if (!pad.theme.flat || pad.takeDirty()) frame++
         }
     }
+    val railShown = !AppState.pad.hideRail
     Box(Modifier.fillMaxSize().background(theme.bottom)) {
       Row(Modifier.fillMaxSize()) {
-        Rail(side, split, theme, panel, { panel = if (panel == it) null else it }, onClose)
+        if (railShown) Rail(side, split, theme, panel, { panel = if (panel == it) null else it }, onClose)
         Canvas(Modifier.weight(1f).fillMaxHeight().systemGestureExclusion()
             .pointerInput(Unit) {
                 awaitPointerEventScope {
@@ -126,7 +130,15 @@ fun PadScreen(onClose: () -> Unit) {
             pad.draw(this, STRIP.toPx())
         }
       }
-        panel?.let { SettingPanel(it, side, split, theme) { panel = null } }
+        if (railShown) panel?.let { SettingPanel(it, side, split, theme) { panel = null } }
+        // The rail tucked away: one small button in the corner brings it back.
+        else Box(Modifier.padding(6.dp).size(44.dp)
+                     .background(if (theme.flat) Color.White else theme.rail, RoundedCornerShape(12.dp))
+                     .border(BorderStroke(if (theme.flat) 2.dp else 1.dp, if (theme.flat) Color.Black else theme.railDim), RoundedCornerShape(12.dp))
+                     .clickable { AppState.updatePad(0) { it.copy(hideRail = false) } },
+                 contentAlignment = Alignment.Center) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Show the settings", tint = theme.railText)
+        }
     }
 }
 
@@ -158,11 +170,17 @@ private fun Rail(side: Int, split: Boolean, t: PadTheme, open: String?, pick: (S
                .then(if (t.flat) Modifier.border(BorderStroke(2.dp, Color.Black)) else Modifier)
                .verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close", tint = t.railDim) }
+        Row {
+            IconButton(onClick = onClose, Modifier.size(44.dp)) { Icon(Icons.Filled.Close, "Close", tint = t.railDim) }
+            // Tuck the rail away for the whole width to play on; the corner button brings it back.
+            IconButton(onClick = { AppState.updatePad(0) { it.copy(hideRail = true) } }, Modifier.size(44.dp)) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Hide the settings", tint = t.railDim) }
+        }
         if (split) SideToggle(side, t)
         val items = listOf(
             "Sound" to (AppState.instrument(side)?.name ?: ""),
             "Arp" to (if (part.arp) ARP_ORDERS[part.order.coerceIn(ARP_ORDERS.indices)] else "Off"),
+            "Effects" to effectsSummary(part),
             "Size" to "${s.size}",
             "Octave" to (if (s.octave == 0) "0" else "%+d".format(s.octave)),
             "Key" to NOTE_NAMES[s.key],
@@ -191,6 +209,13 @@ private fun Rail(side: Int, split: Boolean, t: PadTheme, open: String?, pick: (S
             AppState.updatePad(0) { it.copy(locked = !it.locked) }
         }
     }
+}
+
+/** A word or two for the rail: the effects that are on for this part. */
+private fun effectsSummary(p: com.patrickreynolds.mpeinstruments.Part): String {
+    val on = listOfNotNull("Verb".takeIf { p.reverb > 0.01f }, "Delay".takeIf { p.delay > 0.01f },
+                           "Drive".takeIf { p.drive > 0.01f }, "Tone".takeIf { p.brightness < 0.999f })
+    return when { on.isEmpty() -> "Dry"; on.size <= 2 -> on.joinToString(" + "); else -> "${on.size} on" }
 }
 
 /** Left or right: which pad of a split the rail changes. */
@@ -256,6 +281,17 @@ private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, 
                     val bpm = AppState.perf.bpm
                     LabeledSlider("Tempo", bpm, 40f..220f, "${bpm.roundToInt()} bpm", accent = accent) { v ->
                         AppState.update { it.copy(bpm = v.roundToInt().toFloat()) } }
+                }
+                "Effects" -> Column(Modifier.verticalScroll(rememberScrollState())) {
+                    PartEffects(side, accent)
+                    val level = AppState.perf.part(side).volume
+                    LabeledSlider("Level", level, 0f..1.5f, pct(level), accent = accent) { v -> AppState.updatePart(side) { it.copy(volume = v) } }
+                    Text(if (split) "Reverb (both pads)" else "Reverb", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                         modifier = Modifier.padding(top = 12.dp))
+                    ReverbControls()
+                    Text(if (split) "Delay (both pads)" else "Delay", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                         modifier = Modifier.padding(top = 12.dp))
+                    DelayControls()
                 }
                 "Size" -> Stepper("${s.size} notes across") { d -> set { it.copy(size = (it.size + d).coerceIn(3, 24)) } }
                 "Octave" -> {
