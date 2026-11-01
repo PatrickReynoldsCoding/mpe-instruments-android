@@ -49,6 +49,8 @@ struct PartConfig {
     float pressureCurve = 1;   // pressure ^ curve: < 1 swells sooner, > 1 needs a firmer press
     float reverb = 0;          // send to the master reverb, 0..1
     float delay = 0;           // send to the master delay, 0..1
+    float release = 0;         // s: after the finger lifts the note plays on as it was and fades out
+                               // over this long (0 = the instrument's own ending)
 };
 
 struct Performance {

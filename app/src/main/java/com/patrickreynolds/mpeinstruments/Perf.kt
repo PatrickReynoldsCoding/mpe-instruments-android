@@ -19,12 +19,14 @@ data class Part(
     val pressureCurve: Float = 1f,
     val reverb: Float = 0.15f,
     val delay: Float = 0f,
+    val release: Float = 0f,       // s the note plays on and fades after the finger lifts; 0 = the instrument's own
 ) {
     fun json() = JSONObject().apply {
         put("instrument", instrument); put("arp", arp); put("order", order); put("rate", rate.toDouble())
         put("gate", gate.toDouble()); put("octaves", octaves); put("latch", latch); put("transpose", transpose)
         put("volume", volume.toDouble()); put("brightness", brightness.toDouble()); put("drive", drive.toDouble())
         put("pressureCurve", pressureCurve.toDouble()); put("reverb", reverb.toDouble()); put("delay", delay.toDouble())
+        put("release", release.toDouble())
     }
 
     companion object {
@@ -34,7 +36,8 @@ data class Part(
             o.optInt("octaves", d.octaves), o.optBoolean("latch", d.latch), o.optInt("transpose", d.transpose),
             o.optDouble("volume", d.volume.toDouble()).toFloat(), o.optDouble("brightness", d.brightness.toDouble()).toFloat(),
             o.optDouble("drive", d.drive.toDouble()).toFloat(), o.optDouble("pressureCurve", d.pressureCurve.toDouble()).toFloat(),
-            o.optDouble("reverb", d.reverb.toDouble()).toFloat(), o.optDouble("delay", d.delay.toDouble()).toFloat())
+            o.optDouble("reverb", d.reverb.toDouble()).toFloat(), o.optDouble("delay", d.delay.toDouble()).toFloat(),
+            o.optDouble("release", d.release.toDouble()).toFloat().coerceIn(0f, RELEASE_MAX))
     }
 }
 
@@ -58,18 +61,18 @@ data class Perf(
 
     /** The layout nativeSetPerformance (jni.cpp) reads. Keep the two in step. */
     fun toArray(): FloatArray {
-        val a = FloatArray(11 + 2 * 13)
+        val a = FloatArray(11 + 2 * 14)
         a[0] = layout.toFloat(); a[1] = splitNote.toFloat(); a[2] = bpm
         a[3] = SCALES[scale.coerceIn(SCALES.indices)].mask.toFloat(); a[4] = scaleRoot.toFloat()
         a[5] = if (scale == 0) 0f else assist
         a[6] = reverbSize; a[7] = reverbDamp; a[8] = delayBeats; a[9] = delayFeedback; a[10] = if (delayPingPong) 1f else 0f
         for (k in 0..1) {
             val p = parts[k]
-            val b = 11 + 13 * k
+            val b = 11 + 14 * k
             a[b] = if (p.arp) 1f else 0f; a[b + 1] = p.order.toFloat(); a[b + 2] = p.rate; a[b + 3] = p.gate
             a[b + 4] = p.octaves.toFloat(); a[b + 5] = if (p.latch) 1f else 0f; a[b + 6] = p.transpose.toFloat()
             a[b + 7] = p.volume; a[b + 8] = p.brightness; a[b + 9] = p.drive; a[b + 10] = p.pressureCurve
-            a[b + 11] = p.reverb; a[b + 12] = p.delay
+            a[b + 11] = p.reverb; a[b + 12] = p.delay; a[b + 13] = p.release
         }
         return a
     }
@@ -171,6 +174,10 @@ val SCALES = listOf(
 
 val NOTE_NAMES = listOf("C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B")
 fun noteName(n: Int) = NOTE_NAMES[((n % 12) + 12) % 12] + (n / 12 - 1)
+
+/** The longest release, seconds. */
+const val RELEASE_MAX = 8f
+fun releaseName(s: Float) = when { s < 0.01f -> "Off"; s < 1f -> "%.2f s".format(s); else -> "%.1f s".format(s) }
 
 val ARP_ORDERS = listOf("Up", "Down", "Up-down", "As played", "Random", "Chord")
 /** Arp rates as (label, steps per beat). */

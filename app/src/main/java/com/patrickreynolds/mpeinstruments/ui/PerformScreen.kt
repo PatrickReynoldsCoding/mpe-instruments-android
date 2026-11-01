@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.ARP_ORDERS
 import com.patrickreynolds.mpeinstruments.ARP_RATES
+import com.patrickreynolds.mpeinstruments.RELEASE_MAX
+import com.patrickreynolds.mpeinstruments.releaseName
 import com.patrickreynolds.mpeinstruments.AppState
 import com.patrickreynolds.mpeinstruments.DELAY_TIMES
 import com.patrickreynolds.mpeinstruments.NOTE_NAMES
@@ -182,6 +184,7 @@ fun PartEffects(k: Int, c: Color) {
                   when { pos < -0.15f -> "light"; pos > 0.15f -> "firm"; else -> "even" }, accent = c) { v ->
         AppState.updatePart(k) { it.copy(pressureCurve = Math.pow(3.0, v.toDouble()).toFloat()) }
     }
+    ReleaseSlider(k, c)
     LabeledSlider("Reverb", p.reverb, 0f..1f, pct(p.reverb), accent = c) { v -> AppState.updatePart(k) { it.copy(reverb = v) } }
     LabeledSlider("Delay", p.delay, 0f..1f, pct(p.delay), accent = c) { v -> AppState.updatePart(k) { it.copy(delay = v) } }
 }
@@ -204,4 +207,17 @@ fun DelayControls() {
     }
     LabeledSlider("Feedback", perf.delayFeedback, 0f..0.9f, pct(perf.delayFeedback)) { v -> AppState.update { it.copy(delayFeedback = v) } }
     SwitchRow("Ping-pong", perf.delayPingPong, "Echoes bounce between left and right") { v -> AppState.update { it.copy(delayPingPong = v) } }
+}
+
+/**
+ * How long a note plays on and fades after the finger lifts, for part k. Squared, so the short
+ * times, where a small change is easy to hear, get most of the slider.
+ */
+@Composable
+fun ReleaseSlider(k: Int, c: Color) {
+    val r = AppState.perf.part(k).release
+    LabeledSlider("Release", kotlin.math.sqrt(r / RELEASE_MAX), 0f..1f, releaseName(r), accent = c) { v ->
+        val s = v * v * RELEASE_MAX
+        AppState.updatePart(k) { it.copy(release = if (s < 0.02f) 0f else s) }
+    }
 }

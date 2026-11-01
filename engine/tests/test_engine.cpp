@@ -161,6 +161,35 @@ int main() {
         r.noteOn(1, 60, 90); r.press(1, 64);
         CHECK(rms(r.run(0.5), size_t(0.2 * kSr), size_t(0.5 * kSr)) > 0.01, "the next note on that channel is back at full volume");
     }
+    {   // release: after the finger lifts the note plays on and fades over the part's release, then ends
+        auto tail = [](float release) {
+            Rig r("synths/lead");
+            Performance p; p.part[0].release = release;
+            r.engine.setPerformance(p);
+            r.noteOn(1, 60, 90); r.press(1, 64);
+            auto held = r.run(0.4);
+            r.noteOff(1, 60);
+            auto after = r.run(1.5);
+            const double lvl = rms(held, size_t(0.2 * kSr), held.size());
+            return std::vector<double>{lvl, rms(after, size_t(0.3 * kSr), size_t(0.4 * kSr)),
+                                       rms(after, size_t(0.7 * kSr), size_t(0.8 * kSr)),
+                                       rms(after, size_t(1.3 * kSr), after.size()), double(r.engine.activeVoices())};
+        };
+        auto none = tail(0), one = tail(1.0f);
+        CHECK(none[1] < 0.1 * none[0], "no release: the lead stops soon after the finger lifts (%.4f of %.4f)", none[1], none[0]);
+        CHECK(one[1] > 0.3 * one[0], "release 1 s: still sounding 0.3 s after the lift (%.3f of %.3f)", one[1], one[0]);
+        CHECK(one[2] < one[1] && one[2] > 0.01 * one[0], "release 1 s: fading at 0.7 s (%.3f, was %.3f)", one[2], one[1]);
+        CHECK(one[3] < 1e-4, "release 1 s: silent after it (%.6f)", one[3]);
+        CHECK(one[4] == 0, "release 1 s: the voice is freed after the fade (%d active)", int(one[4]));
+        // A new note on the same finger cuts the release.
+        Rig r("synths/lead");
+        Performance p; p.part[0].release = 3.0f;
+        r.engine.setPerformance(p);
+        r.noteOn(1, 60, 90); r.press(1, 64); r.run(0.3); r.noteOff(1, 60); r.run(0.1);
+        r.noteOn(1, 67, 90); r.press(1, 64);
+        auto again = r.run(0.5);
+        CHECK(rms(again, size_t(0.3 * kSr), again.size()) > 0.5 * one[0], "a new note on that finger plays at full level");
+    }
     {   // latency bookkeeping: a message that arrived 5 ms before the block started
         Rig r("strings/cello");
         const uint8_t press[2] = {0xD1, 10};

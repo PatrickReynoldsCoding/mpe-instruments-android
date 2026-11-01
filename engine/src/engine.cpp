@@ -83,6 +83,9 @@ struct Engine::Voice {
     int seen = 0;                   // play mode: the finger's noteOnCount already handled
     float bend = 0, pressure = 0, slide = 0.5f, velocity = 0;   // last expression from the finger
     float volume = 1, volumeS = 1;
+    bool wasGated = false;
+    bool ringing = false;           // the finger lifted, the part has a release: still gated, fading
+    float relGain = 1;              // the release fade: 1 while held, down to 0 over the release
     float freq = 440, pitch = 0, pressureS = 0, slideS = 0.5f, level = 0;
     float pull = 0, prevPitch = 0, speed = 0;   // pitch assist
     int quietSamples = 0;
@@ -224,6 +227,8 @@ void Engine::releasePart(int p) {
     for (int i = 1; i < kChannels; i++) {
         Voice& v = P.v[i];
         v.gate = false;
+        v.wasGated = false;                      // a panic or a mode change ends notes now, without the release
+        v.ringing = false;
         v.start = false;
         v.finger = -1;
         v.seen = ch_[i].noteOnCount;            // play mode: do not restart fingers already down
@@ -435,6 +440,12 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
             }
             v.gate = mine && f.note >= 0;
         }
+        // Release: when the gate closes the note plays on as it was (the instrument stays gated) and
+        // fades out over the part's release, then ends. It is cut off if the voice starts again.
+        const float release = perf_.part[p].release;
+        if (!v.gate && v.wasGated && release > 0.01f && v.sounding) v.ringing = true;
+        if (v.gate) v.ringing = false;
+        v.wasGated = v.gate;
         v.releasedSamples = v.gate ? 0 : std::min(v.releasedSamples + n, 1 << 30);
         // Expression: from the finger while it still holds this note, else the last values.
         if (v.finger > 0) {
@@ -462,6 +473,8 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
             v.pressureS = pressT;
             v.slideS = slideT;
             v.volumeS = v.volume;
+            v.ringing = false;
+            v.relGain = 1;
             sl.d->instanceClear();                               // so `gate > gate'` sees a clean 0 -> 1
         }
         if (!v.sounding) continue;
@@ -475,7 +488,7 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
         v.freq = std::min(std::max(v.freq, 20.f), 5000.f);
 
         if (sl.freq) *sl.freq = v.freq;
-        if (sl.gate) *sl.gate = v.gate ? 1.f : 0.f;
+        if (sl.gate) *sl.gate = v.gate || v.ringing ? 1.f : 0.f;
         const float curve = perf_.part[p].pressureCurve;
         if (sl.pressure) *sl.pressure = curve == 1.f ? v.pressureS : std::pow(v.pressureS, std::min(std::max(curve, 0.2f), 4.f));
         if (sl.slide) *sl.slide = v.slideS;
@@ -499,14 +512,22 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
         // The finger's volume, ramped across the block so a fade has no steps.
         const float g0 = v.volumeS;
         if (v.gate) v.volumeS = smoothTo(v.volumeS, v.volume, cPress);
-        const float dg = (v.volumeS - g0) / n;
+        // The release fade, as a gain squared (falls slowly at first, like a decaying sound).
+        const float r0 = v.relGain;
+        if (v.ringing) {
+            v.relGain = std::max(0.f, v.relGain - n / (std::max(release, 0.01f) * sr_));
+            if (v.relGain <= 0.f) v.ringing = false;            // faded out: the voice ends below
+        }
+        const float a0 = g0 * r0 * r0, a1 = v.volumeS * v.relGain * v.relGain;
+        const float dg = (a1 - a0) / n;
         for (int k = 0; k < n; k++) {
-            const float g = gain * (g0 + dg * (k + 1));
+            const float g = gain * (a0 + dg * (k + 1));
             mixL[k] += bufL[k] * g; mixR[k] += r[k] * g;
         }
         v.level = smoothTo(v.level, std::sqrt(e / (2 * n)), 0.2f);
         if (!v.gate) v.quietSamples = (v.level < 3e-5f) ? v.quietSamples + n : 0;
         if (!v.gate && v.quietSamples > quietLimit) v.sounding = false;     // fully decayed
+        if (!v.gate && !v.ringing && v.relGain <= 0.f) v.sounding = false;  // the release has faded it out
     }
     // One body for all the part's notes, as on a real instrument (lib/mpe.lib `post`).
     if (InstrumentSet* S = P.set; S->post) {

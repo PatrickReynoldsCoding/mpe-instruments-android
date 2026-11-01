@@ -35,7 +35,7 @@ FN(void, nativeSetPartInstrument)(JNIEnv*, jobject, jint part, jint i) { synth()
 
 // The whole Performance as one float array. Layout must match Perf.toArray() in Perf.kt.
 FN(void, nativeSetPerformance)(JNIEnv* env, jobject, jfloatArray arr) {
-    constexpr int kHead = 11, kPart = 13;
+    constexpr int kHead = 11, kPart = 14;
     if (env->GetArrayLength(arr) < kHead + 2 * kPart) return;
     float a[kHead + 2 * kPart];
     env->GetFloatArrayRegion(arr, 0, kHead + 2 * kPart, a);
@@ -67,6 +67,7 @@ FN(void, nativeSetPerformance)(JNIEnv* env, jobject, jfloatArray arr) {
         c.pressureCurve = b[10];
         c.reverb = b[11];
         c.delay = b[12];
+        c.release = b[13];
     }
     synth().setPerformance(p);
 }

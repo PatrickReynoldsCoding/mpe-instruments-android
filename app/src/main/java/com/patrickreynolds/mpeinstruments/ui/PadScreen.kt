@@ -64,6 +64,7 @@ import com.patrickreynolds.mpeinstruments.PhoneControl
 import com.patrickreynolds.mpeinstruments.PhoneMods
 import com.patrickreynolds.mpeinstruments.SCALES
 import com.patrickreynolds.mpeinstruments.ARP_ORDERS
+import com.patrickreynolds.mpeinstruments.releaseName
 import com.patrickreynolds.mpeinstruments.noteName
 import kotlin.math.abs
 import kotlin.math.exp
@@ -181,6 +182,7 @@ private fun Rail(side: Int, split: Boolean, t: PadTheme, open: String?, pick: (S
             "Sound" to (AppState.instrument(side)?.name ?: ""),
             "Arp" to (if (part.arp) ARP_ORDERS[part.order.coerceIn(ARP_ORDERS.indices)] else "Off"),
             "Effects" to effectsSummary(part),
+            "Release" to releaseName(part.release),
             "Size" to "${s.size}",
             "Octave" to (if (s.octave == 0) "0" else "%+d".format(s.octave)),
             "Key" to NOTE_NAMES[s.key],
@@ -292,6 +294,13 @@ private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, 
                     Text(if (split) "Delay (both pads)" else "Delay", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                          modifier = Modifier.padding(top = 12.dp))
                     DelayControls()
+                }
+                "Release" -> {
+                    ReleaseSlider(side, accent)
+                    Text(if (AppState.perf.part(side).release < 0.01f) "A note ends the instrument's own way when you lift your finger."
+                         else "When you lift your finger the note plays on as it was and fades out over this time, " +
+                              "like holding a piano's sustain pedal. A new note on the same finger cuts it off.",
+                         color = TextDim, fontSize = 12.sp)
                 }
                 "Size" -> Stepper("${s.size} notes across") { d -> set { it.copy(size = (it.size + d).coerceIn(3, 24)) } }
                 "Octave" -> {
