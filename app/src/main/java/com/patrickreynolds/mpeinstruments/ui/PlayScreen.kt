@@ -54,8 +54,9 @@ import com.patrickreynolds.mpeinstruments.noteName
 import kotlin.math.roundToInt
 
 @Composable
-fun PlayScreen(stats: Stats?, openPad: () -> Unit) {
+fun PlayScreen(stats: Stats?, openPad: () -> Unit, openSetup: () -> Unit) {
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+        UpdateBanner(openSetup)
         PadCard(openPad)
         OctaveWarning(stats)
         val perf = AppState.perf

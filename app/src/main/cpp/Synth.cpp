@@ -90,6 +90,8 @@ bool Synth::open() {
     eng->setTranspose(transpose_);
     eng->setBendRange(bendRange_);
     eng->setWatchdogMs(watchdogMs_);
+    eng->setTiltMode(mpe::TiltMode(tiltMode_.load()), tiltAmount_);
+    eng->setBreathMode(mpe::BreathMode(breathMode_.load()));
     eng->setInstrument(0, instrument_[0]);
     if (instrument_[1] >= 0) eng->setInstrument(1, instrument_[1]);
     {
@@ -183,6 +185,13 @@ oboe::DataCallbackResult Synth::onAudioReady(oboe::AudioStream* stream, void* da
     }
     if (lost_.exchange(false)) midi_->deviceLost();
     pollMidi(now);
+    // The latest tilt and breath. The engine smooths both. A microphone that could not be
+    // opened turns breath off rather than leaving Swell silent.
+    audioEngine_->setTilt(tiltDeg_.load(std::memory_order_relaxed));
+    const float ob = breathOverride_.load(std::memory_order_relaxed);
+    const bool micDown = ob < 0 && mic_.state() != 1;
+    audioEngine_->setBreathMode(mpe::BreathMode(micDown ? 0 : breathMode_.load(std::memory_order_relaxed)));
+    audioEngine_->setBreath(ob >= 0 ? ob : mic_.level());
     // Render float, in pieces that fit the scratch buffer, converting when the stream is 16-bit.
     const int32_t chunk = floatOut_ ? frames : int32_t(scratch_.size() / 2);
     for (int32_t done = 0; done < frames;) {
@@ -203,6 +212,7 @@ oboe::DataCallbackResult Synth::onAudioReady(oboe::AudioStream* stream, void* da
         }
         done += n;
     }
+    mic_.setEcho(audioEngine_->outputLowDb());       // so the breath detector ignores our own sound
     tune(stream, frames);
     (void)stream;
     return oboe::DataCallbackResult::Continue;
@@ -309,6 +319,33 @@ void Synth::setTranspose(int s) { transpose_ = s; if (auto e = engine()) e->setT
 void Synth::setBendRange(float s) { bendRange_ = s; if (auto e = engine()) e->setBendRange(s); }
 void Synth::setWatchdogMs(int ms) { watchdogMs_ = ms; if (auto e = engine()) e->setWatchdogMs(ms); }
 void Synth::panic() { if (auto e = engine()) e->panic(); }
+
+void Synth::setTiltMode(int mode, float amount) {
+    tiltAmount_ = amount;
+    tiltMode_ = std::min(std::max(mode, 0), 3);
+    if (auto e = engine()) e->setTiltMode(mpe::TiltMode(tiltMode_.load()), amount);
+}
+
+int Synth::setBreath(int mode, float sensitivity) {
+    breathMode_ = std::min(std::max(mode, 0), 2);
+    mic_.setSensitivity(sensitivity);
+    if (auto e = engine()) e->setBreathMode(mpe::BreathMode(breathMode_.load()));
+    if (breathMode_ != 0) mic_.start();
+    else mic_.stop();
+    return mic_.state();
+}
+
+// Order must match PhoneMods.kt (ModReading).
+void Synth::fillModifiers(float o[kModCount]) {
+    std::fill(o, o + kModCount, 0.f);
+    if (auto e = engine()) {
+        const mpe::ModView m = e->modifiers();
+        o[0] = m.tilt; o[1] = m.bend; o[2] = m.slide; o[3] = m.breath; o[4] = m.held ? 1.f : 0.f;
+    }
+    const mpe::Breath::Meter mm = mic_.meter();
+    o[5] = mm.db; o[6] = mm.floorDb; o[7] = mm.onDb; o[8] = mm.fullDb; o[9] = mm.level; o[10] = mm.echoDb;
+    o[11] = float(breathOverride_.load() >= 0 ? 2 : mic_.state());     // 2 = debug override
+}
 
 // Order must match Stats.kt.
 void Synth::fillStats(double o[kStatCount]) {

@@ -85,7 +85,9 @@ fun SetupScreen(stats: Stats?, actions: SetupActions, @Suppress("UNUSED_PARAMETE
                  + "something changes. For e-ink phones such as the Hisense A9.", color = TextDim, fontSize = 12.sp,
                  modifier = Modifier.padding(top = 6.dp))
         }
+        ExperimentalCard()
         SectionCard("Latency") { LatencyPanel(stats) }
+        UpdatesCard()
         SectionCard("App") {
             Button(onClick = actions.stop, modifier = Modifier.fillMaxWidth(),
                    colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = Danger), border = ButtonEdge) {

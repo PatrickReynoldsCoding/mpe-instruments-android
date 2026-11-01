@@ -79,6 +79,26 @@ struct FingerView {
     float pitch = 0, pressure = 0, slide = 0;
 };
 
+// Modifiers from the phone itself: tilt (its gyro) and breath (its microphone). They act on every
+// voice of both parts, whoever plays the notes (a controller or the touch pad).
+//   Vibrato: only the quick wobble of the phone bends the pitch; holding it at a slant does not.
+//   Bend:    tilting bends the pitch, from the angle the phone was at when the first finger went down.
+//   Tone:    tilting moves slide (each instrument's own tone control) up or down.
+enum class TiltMode : int { Off = 0, Vibrato = 1, Bend = 2, Tone = 3 };
+//   Swell:   breath is the loudness: no breath, no sound. It also replaces the fingers' pressure,
+//            so instruments that respond to pressure (bow, voice, reed, filter) respond to it.
+//   Tone:    notes play as usual; breath opens a filter, dark when not blowing (a wah).
+enum class BreathMode : int { Off = 0, Swell = 1, Tone = 2 };
+
+// What the modifiers are doing now, for the screen.
+struct ModView {
+    float tilt = 0;        // degrees the effect sees: the wobble (Vibrato) or the angle from the zero (Bend, Tone)
+    float bend = 0;        // semitones added to every held note
+    float slide = 0;       // added to every note's slide (-1..1)
+    float breath = 0;      // 0..1, as applied
+    bool held = false;     // a finger is down (the tilt zero is fixed while one is)
+};
+
 struct Stats {
     // Time from "bytes arrived" to "the audio block that plays them started", in ms.
     double eventAgeAvgMs = 0, eventAgeMaxMs = 0, eventAgeLastMs = 0;
@@ -118,6 +138,18 @@ public:
     // Meant for Bluetooth, where a lost link is silent.
     void setWatchdogMs(int ms) { watchdogMs_ = ms; }
     void panic() { panicFlag_ = true; }
+    // Tilt. amount is in the mode's own unit: Vibrato cents at a firm (3.5 degree) wobble, Bend
+    // semitones at a 30 degree tilt, Tone the change in slide (0..1) at 30 degrees.
+    void setTiltMode(TiltMode m, float amount) { tiltAmount_ = amount; tiltMode_ = int(m); }
+    // Any thread (the sensor's): the phone's twist about the screen's axis, in degrees, positive
+    // = clockwise as you look at the screen. Unwrapped: it may run past 360.
+    void setTilt(float degrees) { tiltDeg_ = degrees; }
+    void setBreathMode(BreathMode m) { breathMode_ = int(m); }
+    // Any thread (the microphone's): 0..1, see mpe::Breath.
+    void setBreath(float level) { breathIn_ = level; }
+    ModView modifiers() const;
+    // Any thread: the output below 150 Hz in dBFS, peak-held for 150 ms (for mpe::Breath::setEcho).
+    float outputLowDb() const { return lowDb_.load(std::memory_order_relaxed); }
 
     int sampleRate() const { return sr_; }
     int currentInstrument(int part = 0) const { return current_[part]; }
@@ -139,6 +171,7 @@ private:
     void renderVoices(int p, float* mixL, float* mixR, int n, float dt);
     void partFx(int p, float* l, float* r, int n);
     void masterFx(float* mixL, float* mixR, const float* revL, const float* revR, const float* delL, const float* delR, int n);
+    void updateModifiers(float dt);
     struct Fx;
     void publish();
 
@@ -165,6 +198,20 @@ private:
     std::atomic<bool> overflow_{false};
     std::atomic<int> activeVoices_{0};
     int64_t lastEventFrame_ = 0, frameCounter_ = 0;
+
+    // phone modifiers: settings and inputs from other threads ...
+    std::atomic<int> tiltMode_{0}, breathMode_{0};
+    std::atomic<float> tiltAmount_{0}, tiltDeg_{0}, breathIn_{0};
+    // ... and the audio thread's state (see updateModifiers)
+    bool tiltStarted_ = false;
+    float tiltZero_ = 0, tiltHp1_ = 0, tiltHp2_ = 0, tiltPrev_ = 0;   // degrees
+    float modBend_ = 0, modSlide_ = 0, breath_ = 0, gain_[2] = {1, 1}, toneOpen_ = 1;
+    TiltMode tiltNow_ = TiltMode::Off;
+    BreathMode breathNow_ = BreathMode::Off;
+    std::atomic<float> pubTilt_{0}, pubBend_{0}, pubSlide_{0}, pubBreath_{0};
+    std::atomic<bool> pubHeld_{false};
+    float lowZ_[4] = {}, lowB_[5] = {}, lowEnv_ = 0, lowRel_ = 0;   // the output's low end, for the breath detector
+    std::atomic<float> lowDb_{-120.f};
 
     // stats, written by the audio thread
     std::atomic<double> ageSum_{0}, ageMax_{0}, ageLast_{0}, loadSum_{0}, loadPeak_{0};

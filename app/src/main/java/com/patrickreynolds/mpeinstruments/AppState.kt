@@ -19,6 +19,7 @@ data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false
  */
 object AppState {
     private lateinit var prefs: SharedPreferences
+    private lateinit var appContext: Context
     private var started = false
 
     var instruments: List<Native.Instrument> = emptyList()
@@ -41,6 +42,10 @@ object AppState {
     var pad by mutableStateOf(PadSettings())
         private set
 
+    /** Tilt and breath: the phone as a controller; not part of a preset. */
+    var mods by mutableStateOf(PhoneMods())
+        private set
+
     /** E-ink look (black on white, no motion); not part of a preset. */
     var eink by mutableStateOf(false)
         private set
@@ -48,7 +53,8 @@ object AppState {
     fun init(context: Context) {
         if (started) return
         started = true
-        prefs = context.applicationContext.getSharedPreferences("mpe", Context.MODE_PRIVATE)
+        appContext = context.applicationContext
+        prefs = appContext.getSharedPreferences("mpe", Context.MODE_PRIVATE)
         instruments = Native.instruments()
         perf = runCatching { Perf.from(prefs.getString("perf", null)?.let { JSONObject(it) }) }.getOrDefault(Perf())
         // Before presets existed the instrument was saved as an index.
@@ -61,6 +67,7 @@ object AppState {
         eink = prefs.getBoolean("eink", false)
         palette = if (eink) EinkPalette else DarkPalette
         pad = runCatching { PadSettings.from(prefs.getString("pad", null)?.let { JSONObject(it) }) }.getOrDefault(PadSettings())
+        mods = runCatching { PhoneMods.from(prefs.getString("mods", null)?.let { JSONObject(it) }) }.getOrDefault(PhoneMods())
         userPresets = runCatching {
             val a = JSONArray(prefs.getString("presets", "[]"))
             (0 until a.length()).map { a.getJSONObject(it).let { o -> Preset(o.getString("name"), Perf.from(o.getJSONObject("perf"))) } }
@@ -75,6 +82,7 @@ object AppState {
         Native.nativeSetBendRange(bendRange)
         applyInstruments(null)
         Native.nativeSetPerformance(perf.toArray())
+        PhoneControl.apply(appContext, mods)
     }
 
     private fun index(id: String) = instruments.indexOfFirst { it.id == id }.takeIf { it >= 0 }
@@ -117,6 +125,18 @@ object AppState {
         palette = if (on) EinkPalette else DarkPalette
         prefs.edit().putBoolean("eink", on).apply()
     }
+
+    fun updateMods(change: (PhoneMods) -> PhoneMods) {
+        val old = mods
+        mods = change(mods)
+        if (mods == old) return
+        PhoneControl.apply(appContext, mods)
+        // Breath with the screen off: the service has to say it uses the microphone.
+        if ((mods.breath != 0) != (old.breath != 0)) SynthService.refresh(appContext)
+        saver.removeCallbacks(saveMods)
+        saver.postDelayed(saveMods, 400)
+    }
+    private val saveMods = Runnable { prefs.edit().putString("mods", mods.json().toString()).apply() }
 
     fun updatePad(change: (PadSettings) -> PadSettings) {
         pad = change(pad)

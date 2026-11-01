@@ -16,6 +16,7 @@
 #include <amidi/AMidi.h>
 #include <oboe/Oboe.h>
 #include "mpe/engine.h"
+#include "Mic.h"
 
 class Synth : public oboe::AudioStreamDataCallback, public oboe::AudioStreamErrorCallback {
 public:
@@ -47,6 +48,20 @@ public:
     void setWatchdogMs(int ms);
     void panic();
     void resetLatencyTuner() { tuneReset_ = true; }
+
+    // The phone as a controller. Tilt comes from the sensor thread (Motion.kt) at about 200 Hz;
+    // the audio callback hands the latest angle and breath to the engine.
+    void setTiltMode(int mode, float amount);
+    void setTilt(float degrees) { tiltDeg_.store(degrees, std::memory_order_relaxed); }
+    // Starts or stops the microphone (blocks for its stream to open: not on the UI thread).
+    // Returns the microphone state: 0 off, 1 listening, -1 could not open it.
+    int setBreath(int mode, float sensitivity);
+    void stopMic() { mic_.stop(); }
+    // Debug: a fixed breath level instead of the microphone's (< 0 = the microphone).
+    void setBreathOverride(float level) { breathOverride_ = level; }
+    // What the modifiers are doing, for the screen. Order fixed: see PhoneMods.kt.
+    static constexpr int kModCount = 12;
+    void fillModifiers(float out[kModCount]);
 
     // Everything the status line shows. Order is fixed: see Stats.kt.
     static constexpr int kStatCount = 21;
@@ -105,6 +120,11 @@ private:
     std::atomic<int64_t> capPos_{0}, capLen_{0};
     std::atomic<bool> capArmed_{false};
     int capRate_ = 48000;
+
+    // the phone as a controller
+    Mic mic_;
+    std::atomic<int> tiltMode_{0}, breathMode_{0};
+    std::atomic<float> tiltAmount_{0}, tiltDeg_{0}, breathOverride_{-1};
 
     // settings
     std::atomic<int> instrument_[2] = {{0}, {-1}}, transpose_{0}, watchdogMs_{0};

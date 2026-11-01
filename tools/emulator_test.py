@@ -9,7 +9,7 @@ over adb. The fake Seaboard plays notes, replays the recorded session, drops the
 unplugged; the app records its own audio output, which is pulled back and measured here.
 Nothing needs a real controller. Needs an emulator that is already booted.
 """
-import argparse, json, os, re, shlex, subprocess, sys, tempfile, time
+import argparse, math, json, os, re, shlex, subprocess, sys, tempfile, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP, FAKE = "com.patrickreynolds.mpeinstruments", "com.patrickreynolds.fakeseaboard"
@@ -326,6 +326,104 @@ if want("arp"):
     st = stats()
     after = int(st.get("arpSteps", 0)) - s0 - steps
     check("arp: stops when the hand lifts (no latch)", after <= 1, f"{after} steps after release")
+    app_cmd("SET", "--es", "perf", DEFAULT_PERF)
+    time.sleep(0.5)
+
+# ---- 5c. the phone as a controller: tilt and breath ----------------------------------------------
+# The angle and the breath level come from DebugReceiver here (adb is far too slow for a real
+# wobble; the engine tests cover vibrato). One check uses the emulator's own gyroscope.
+def mods(*extras):
+    """Sends PHONE with these extras and returns what the app then reports (the MODS log line)."""
+    mark = device_now()
+    app_cmd("PHONE", *extras)
+    line = wait_log(mark, r"MODS ", 5) or ""
+    return {k: v for k, v in re.findall(r"(\w+)=(\S+)", line.split("MODS ", 1)[-1])}
+
+if want("phone"):
+    app_cmd("SET", "--es", "perf", DEFAULT_PERF)
+    app_cmd("SET", "--es", "instrument", "synths/lead")
+    mods("--ei", "tilt", "2", "--ef", "amount", "2", "--ef", "angle", "0", "--ei", "breath", "0", "--ef", "level", "-1")
+    time.sleep(0.5)
+    # Each condition gets its own recording while the note is held: adb's timing is too loose
+    # to change something in the middle of one.
+    fake_cmd("HOLD", "--ei", "channel", "3", "--ei", "note", "60")
+    time.sleep(0.8)
+    wav0 = record(1.5, "tilt_level", lambda: None)
+    mods("--ef", "angle", "16")
+    time.sleep(0.3)
+    wav1 = record(1.5, "tilt_turned", lambda: None)
+    if wav0 and wav1:
+        before = analyze(wav0, midi_hz(60), 0.3, 1.3)
+        after = analyze(wav1, midi_hz(61), 0.3, 1.3)
+        check("phone: tilt bend, the note starts in tune", before["cents_off"] is not None and abs(before["cents_off"]) <= 20,
+              f"{before['cents_off']} cents")
+        check("phone: tilt bend, a 16 degree turn bends a semitone up", after["cents_off"] is not None and abs(after["cents_off"]) <= 20,
+              f"{after['cents_off']} cents off C#")
+    else:
+        check("phone: tilt bend recordings", False)
+    fake_cmd("STOP")
+    time.sleep(1)
+    m = mods("--ef", "angle", "16")
+    check("phone: with no finger down the zero follows the phone (no bend)", abs(float(m.get("bend", 9))) < 0.02 and m.get("held") == "0.0",
+          f"bend {m.get('bend')}, held {m.get('held')}")
+    # The real sensor path. The emulator's `rotate` turns the virtual phone a quarter turn
+    # (gyroscope and accelerometer agreeing, as on a real phone; setting the gyroscope alone
+    # does not move the fused sensor). Afterwards gravity on x says which way it went.
+    def gravity():
+        out = subprocess.run(ADB + ["emu", "sensor", "get", "acceleration"], capture_output=True, text=True).stdout
+        v = re.search(r"acceleration = ([-\d.e+]+):([-\d.e+]+)", out)
+        return (float(v.group(1)), float(v.group(2))) if v else (0.0, 0.0)
+    mods("--ez", "gyro", "true", "--ei", "tilt", "2")
+    fake_cmd("HOLD", "--ei", "channel", "3", "--ei", "note", "60")
+    time.sleep(1.0)
+    g0 = gravity()
+    adb("emu", "rotate")
+    time.sleep(2.0)
+    g1 = gravity()
+    # Gravity, as the phone feels it, turns the other way to the phone: anticlockwise in the
+    # phone's x-y plane for a clockwise turn. So the turn, clockwise positive, is its change of angle.
+    turn = math.degrees(math.atan2(g1[1], g1[0]) - math.atan2(g0[1], g0[0]))
+    turn = (turn + 180) % 360 - 180
+    m = mods()
+    t = float(m.get("tilt", 0))
+    check("phone: turning the emulator's phone a quarter turn reads as one, the right way round", abs(t - turn) < 15 and abs(turn) > 60,
+          f"tilt {t:.1f} degrees, the phone turned {turn:.0f} (clockwise positive)")
+    check("phone: and bends the held note by the whole range", abs(abs(float(m.get("bend", 0))) - 2) < 0.05, f"bend {m.get('bend')}")
+    fake_cmd("STOP")
+    for _ in range(3): adb("emu", "rotate"); time.sleep(0.7)   # back the way up it was
+    mods("--ei", "tilt", "0", "--ef", "angle", "0")
+    time.sleep(0.5)
+
+    # Breath swell on a cello: silent until you blow, whatever the finger presses.
+    app_cmd("SET", "--es", "instrument", "strings/cello")
+    mods("--ei", "breath", "1", "--ef", "level", "0")
+    time.sleep(0.5)
+    fake_cmd("HOLD", "--ei", "channel", "3", "--ei", "note", "50")
+    time.sleep(0.8)
+    wav0 = record(1.5, "breath_none", lambda: None)
+    mods("--ef", "level", "0.8")
+    time.sleep(0.3)
+    wav1 = record(1.5, "breath_blow", lambda: None)
+    if wav0 and wav1:
+        quiet, loud = analyze(wav0)["peak"], rms_between(analyze(wav1), 0.2, 1.4)
+        check("phone: breath swell, a held cello note is silent until you blow", quiet < 0.002, f"peak {quiet}")
+        check("phone: breath swell, blowing sounds it", loud > 0.01, f"max rms {loud}")
+    else:
+        check("phone: breath swell recordings", False)
+    m = mods()
+    check("phone: the app reports the breath it applies", abs(float(m.get("breath", 0)) - 0.8) < 0.05, f"breath {m.get('breath')}")
+    # The real microphone (the emulator's): it must open, or say it cannot, and never crash.
+    fake_cmd("STOP")
+    m = mods("--ef", "level", "-1")
+    time.sleep(1)
+    m = mods()
+    check("phone: the microphone opens, or reports that it cannot", m.get("micState") in ("1.0", "-1.0"), f"micState {m.get('micState')}")
+    mods("--ei", "breath", "0", "--ef", "level", "-1")
+    time.sleep(0.5)
+    wav = record(2.5, "breath_off", lambda: fake_cmd("NOTE", "--ei", "channel", "3", "--ei", "note", "50", "--ef", "seconds", "1.5"))
+    if wav:
+        res = analyze(wav)
+        check("phone: breath off, notes play without blowing", rms_between(res, 0.6, 1.4) > 0.01, f"max rms {rms_between(res, 0.6, 1.4)}")
     app_cmd("SET", "--es", "perf", DEFAULT_PERF)
     time.sleep(0.5)
 

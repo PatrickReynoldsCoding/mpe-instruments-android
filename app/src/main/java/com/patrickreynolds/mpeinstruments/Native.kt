@@ -34,6 +34,18 @@ object Native {
     external fun nativeResetLatencyTuner()
     external fun nativeStats(): DoubleArray
 
+    // The phone as a controller (PhoneMods.kt).
+    /** The phone's twist in degrees, clockwise positive; from the sensor thread. */
+    external fun nativeSetTilt(degrees: Float)
+    /** mode: 0 off, 1 vibrato, 2 bend, 3 tone; amount in the mode's unit (cents, semitones, slide). */
+    external fun nativeSetTiltMode(mode: Int, amount: Float)
+    /** mode: 0 off, 1 swell, 2 tone. Opens or closes the microphone, so not on the UI thread. Returns 0 off, 1 listening, -1 failed. */
+    external fun nativeSetBreath(mode: Int, sensitivity: Float): Int
+    /** Debug: a fixed breath level in place of the microphone's; < 0 = the microphone again. */
+    external fun nativeDebugBreath(level: Float)
+    /** What tilt and breath are doing, 12 floats: see ModReading. */
+    external fun nativeModifiers(out: FloatArray): Int
+
     // Debug: record the audio output (used by the emulator tests).
     external fun nativeCaptureStart(seconds: Float): Boolean
     external fun nativeCaptureProgress(): Double

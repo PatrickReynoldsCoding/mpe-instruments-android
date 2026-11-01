@@ -10,9 +10,12 @@ import java.io.File
  * Test hooks, debug builds only. Results go to logcat with the tag "mpe-test".
  *   adb shell am broadcast -n com.patrickreynolds.mpeinstruments/.DebugReceiver -a RECORD --ef seconds 5 --es name note
  *   ... -a STATS
- *   ... -a SET --es instrument strings/cello --ei watchdog 1500 --ei transpose 0 --ef volume 0.8
+ *   ... -a SET --es instrument strings/cello --ei watchdog 1500 --ei transpose 0 --ef volume 0.8 --ez eink false
  *   ... -a PANIC
  *   ... -a BLE_CONNECT --ef seconds 15     scan for a BLE MIDI device, connect to the first found
+ *   ... -a PHONE --ei tilt 2 --ef amount 2 --ef angle 16 --ei breath 1 --ef level 0.5 --ef sensitivity 0.5
+ *       tilt and breath: modes as in PhoneMods; `angle` replaces the gyro (--ez gyro true gives it back);
+ *       `level` replaces the microphone (-1 gives it back). Logs what they are doing (MODS alone just logs).
  * Recordings are saved to /sdcard/Android/data/com.patrickreynolds.mpeinstruments/files/<name>.wav
  */
 class DebugReceiver : BroadcastReceiver() {
@@ -52,12 +55,34 @@ class DebugReceiver : BroadcastReceiver() {
                 if (intent.hasExtra("transpose")) AppState.changeTranspose(intent.getIntExtra("transpose", 0))
                 if (intent.hasExtra("volume")) AppState.changeVolume(intent.getFloatExtra("volume", 0.8f))
                 if (intent.hasExtra("bend")) AppState.changeBendRange(intent.getFloatExtra("bend", 48f))
+                if (intent.hasExtra("eink")) AppState.changeEink(intent.getBooleanExtra("eink", false))
                 // --es perf '<Perf json>' sets the whole performance (split, arp, effects); --es preset <name> loads one.
                 intent.getStringExtra("perf")?.let { j -> AppState.update { Perf.from(org.json.JSONObject(j)) } }
                 intent.getStringExtra("preset")?.let { n -> AppState.allPresets.firstOrNull { it.name == n }?.let { AppState.load(it) } }
                 Log.i(TAG, "SET done")
             }
             "PANIC" -> { Native.nativePanic(); Log.i(TAG, "PANIC done") }
+            "PHONE" -> {
+                AppState.init(context)
+                PhoneControl.forceBreath = true                    // breath without the microphone permission
+                if (intent.hasExtra("angle")) { Motion.debugAngle = intent.getFloatExtra("angle", 0f); Native.nativeSetTilt(Motion.debugAngle!!) }
+                if (intent.getBooleanExtra("gyro", false)) Motion.debugAngle = null
+                if (intent.hasExtra("level")) Native.nativeDebugBreath(intent.getFloatExtra("level", -1f))
+                AppState.updateMods { m ->
+                    val tilt = intent.getIntExtra("tilt", m.tilt).coerceIn(0, 3)
+                    var n = m.copy(tilt = tilt, breath = intent.getIntExtra("breath", m.breath).coerceIn(0, 2),
+                                   sensitivity = intent.getFloatExtra("sensitivity", m.sensitivity))
+                    if (intent.hasExtra("amount")) {
+                        val a = intent.getFloatExtra("amount", 0f)
+                        n = when (tilt) { 1 -> n.copy(vibratoCents = a); 2 -> n.copy(bendSemis = a); 3 -> n.copy(toneRange = a); else -> n }
+                    }
+                    n
+                }
+                // Tilt only runs while the app is on screen; from adb it may not be.
+                if (intent.hasExtra("tilt")) Motion.forceOn(context, AppState.mods.tilt != 0)
+                logMods()
+            }
+            "MODS" -> logMods()
             "BLE_CONNECT" -> {
                 val seconds = intent.getFloatExtra("seconds", 15f)
                 var done = false
@@ -78,6 +103,16 @@ class DebugReceiver : BroadcastReceiver() {
             }
             else -> Log.w(TAG, "unknown command ${intent.action}")
         }
+    }
+
+    private fun logMods() {
+        Thread {
+            Thread.sleep(150)                                      // let a callback or two pick the change up
+            val b = FloatArray(12)
+            Native.nativeModifiers(b)
+            Log.i(TAG, "MODS tilt=${b[0]} bend=${b[1]} slide=${b[2]} breath=${b[3]} held=${b[4]} micDb=${b[5]} floorDb=${b[6]} " +
+                "onDb=${b[7]} fullDb=${b[8]} micLevel=${b[9]} echoDb=${b[10]} micState=${b[11]} mods=${AppState.mods.json()}")
+        }.start()
     }
 
     companion object { private const val TAG = "mpe-test" }

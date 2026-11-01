@@ -44,6 +44,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -52,7 +54,10 @@ import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.AppState
 import com.patrickreynolds.mpeinstruments.NOTE_NAMES
 import com.patrickreynolds.mpeinstruments.Native
+import com.patrickreynolds.mpeinstruments.ModReading
 import com.patrickreynolds.mpeinstruments.PadSettings
+import com.patrickreynolds.mpeinstruments.PhoneControl
+import com.patrickreynolds.mpeinstruments.PhoneMods
 import com.patrickreynolds.mpeinstruments.SCALES
 import com.patrickreynolds.mpeinstruments.noteName
 import kotlin.math.abs
@@ -137,9 +142,16 @@ private fun Rail(s: PadSettings, t: PadTheme, sound: String, open: String?, pick
             "Key" to NOTE_NAMES[s.key],
             "Scale" to (if (s.scale == 0) "All notes" else SCALES[s.scale].name),
             "Up/down" to PadSettings.VERTICAL[s.vertical],
+            // Experimental: on the rail once turned on in Setup (or while its panel is open here).
+            "Tilt" to PhoneMods.TILT[AppState.mods.tilt],
+            "Breath" to PhoneMods.BREATH[AppState.mods.breath],
             "Glide" to if (s.snap) "Snap" else "Free",
             "Look" to if (Eink) "E-ink" else PAD_THEMES[s.theme].name,
-        )
+        ).filter { (label, _) -> when (label) {
+            "Tilt" -> AppState.mods.tilt != 0 || open == "Tilt"
+            "Breath" -> AppState.mods.breath != 0 || open == "Breath"
+            else -> true
+        } }
         for ((label, value) in items) RailItem(label, value, open == label, t) { pick(label) }
         // Not a panel: one tap locks the note strip so a stray touch cannot move the notes.
         RailItem(if (s.locked) "Locked" else "Lock", if (s.locked) "Strip plays" else "Strip moves", s.locked, t) {
@@ -204,6 +216,10 @@ private fun SettingPanel(which: String, s: PadSettings, t: PadTheme, close: () -
                     else Chips(PAD_THEMES.map { it.name }, s.theme) { k -> AppState.updatePad { it.copy(theme = k) } }
                     Text("Lines", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                     Chips(PadSettings.LINES, s.lines) { k -> AppState.updatePad { it.copy(lines = k) } }
+                }
+                "Tilt", "Breath" -> Column(Modifier.verticalScroll(rememberScrollState())) {
+                    val r = liveModReading()
+                    if (which == "Tilt") TiltControls(r) else BreathControls(r)
                 }
                 "Glide" -> {
                     Chips(listOf("Snap", "Free"), if (s.snap) 0 else 1) { k -> AppState.updatePad { it.copy(snap = k == 0) } }
@@ -280,6 +296,9 @@ private class Pad {
     private val lastExt = FloatArray(16 * 5)
     private var nExt = 0
     private var dirty = true
+    /** Tilt and breath now, and which are on (read every frame while one is). */
+    private var mod = ModReading()
+    private var modsOn = PhoneMods()
 
     fun takeDirty() = dirty.also { dirty = false }
 
@@ -359,6 +378,10 @@ private class Pad {
     fun releaseAll() { grabs.clear(); for (id in fingers.keys.toList()) up(id) }
 
     fun tick(dt: Float) {
+        modsOn = AppState.mods
+        val r = if (modsOn.tilt != 0 || modsOn.breath != 0) ModReading.read() else ModReading()
+        if (r.coarse() != mod.coarse()) dirty = true          // e-ink: redraw when it changed enough to see
+        mod = r
         for (f in fingers.values) {
             f.age += dt
             f.speed *= exp(-dt / 0.06f)
@@ -369,7 +392,7 @@ private class Pad {
             }
             sendExpression(f)
             if (!theme.flat) {
-                f.trail.addLast(Offset(xOf(f.pitch), f.y))
+                f.trail.addLast(Offset(xOf(f.pitch + mod.bend), f.y))   // the trail shows a tilt's vibrato too
                 if (f.trail.size > 28) f.trail.removeFirst()
             }
         }
@@ -435,6 +458,16 @@ private class Pad {
                      strokeWidth = if (t.flat) (if (root) rw + 2f else lw) else if (root) rw else lw)
         }
         drawStrip(this, strip, cw, held)
+        // Breath: a glow rising from the bottom as you blow (on e-ink a bar along the bottom).
+        if (modsOn.breath != 0 && mod.breath > 0.01f) {
+            val b = mod.breath
+            if (t.flat) drawRect(Color.Black, Offset(0f, playH - 12f), Size(w * b, 12f))
+            else {
+                val top = playH * (1 - 0.7f * b)
+                drawRect(Brush.verticalGradient(listOf(t.parts[1].copy(alpha = 0f), t.parts[1].copy(alpha = 0.32f * b)), startY = top, endY = playH),
+                         topLeft = Offset(0f, top), size = Size(w, playH - top))
+            }
+        }
         for (r in ripples) {
             val k = r.age / 0.7f
             drawCircle(r.color.copy(alpha = 0.5f * (1 - k)), radius = 40f + 220f * k, center = Offset(r.x * w, (1 - r.y) * playH),
@@ -444,7 +477,7 @@ private class Pad {
         for (i in 0 until nExt) {                           // a controller's fingers (ours are drawn below)
             val b = 5 * i
             if (ext[b].toInt() in mine) continue
-            orb(Offset(xOf(ext[b + 2]) * w, (1 - ext[b + 4]) * playH), ext[b + 3], colorOf(ext[b + 1].toInt()))
+            orb(Offset(xOf(ext[b + 2] + mod.bend) * w, (1 - ext[b + 4]) * playH), loudness(ext[b + 3]), colorOf(ext[b + 1].toInt()))
         }
         for (f in fingers.values) {
             val c = colorOf(f.note)
@@ -452,7 +485,71 @@ private class Pad {
                 val a = (k + 1f) / f.trail.size
                 drawCircle(c.copy(alpha = 0.22f * a), radius = 8f + 26f * a, center = Offset(p.x * w, (1 - p.y) * playH))
             }
-            orb(Offset(xOf(f.pitch) * w, (1 - f.y) * playH), f.pressure / 127f, c)
+            orb(Offset(xOf(f.pitch + mod.bend) * w, (1 - f.y) * playH), loudness(f.pressure / 127f), c)
+        }
+        drawHud(this, playH)
+    }
+
+    /** How big an orb is drawn: its pressure, or the breath when breath is the loudness (Swell). */
+    private fun loudness(pressure: Float) = if (modsOn.breath == 1) mod.breath else pressure
+
+    /** Tilt and breath along the top of the pad while one is on: what each is doing now. */
+    private fun drawHud(d: androidx.compose.ui.graphics.drawscope.DrawScope, playH: Float) = with(d) {
+        val items = listOf(modsOn.tilt != 0, modsOn.breath != 0).count { it }
+        if (items == 0) return@with
+        val t = theme
+        val iw = 176.dp.toPx(); val ih = 52.dp.toPx(); val gap = 10.dp.toPx(); val top = 8.dp.toPx(); val rr = 14.dp.toPx()
+        var x0 = (size.width - items * iw - (items - 1) * gap) / 2
+        val canvas = drawContext.canvas.nativeCanvas
+        val text = android.graphics.Paint().apply { isAntiAlias = true; color = t.label.toArgb() }
+        val ink = if (t.flat) Color.Black else t.label
+        fun box() {
+            val bg = when { t.flat -> Color.White; t.name == "Daylight" -> Color.White.copy(alpha = 0.8f); else -> Color.Black.copy(alpha = 0.45f) }
+            drawRoundRect(bg, Offset(x0, top), Size(iw, ih), CornerRadius(rr))
+            if (t.flat) drawRoundRect(Color.Black, Offset(x0, top), Size(iw, ih), CornerRadius(rr), style = Stroke(width = 3f))
+        }
+        fun label(s: String, x: Float, y: Float, sizeDp: Float, bold: Boolean, alpha: Float = 1f) {
+            text.textSize = sizeDp.dp.toPx(); text.isFakeBoldText = bold; text.alpha = (alpha * 255).toInt()
+            canvas.drawText(s, x, y, text)
+        }
+        if (modsOn.tilt != 0) {
+            box()
+            // A little phone turned as the phone is (the needle's full swing is the full effect), and the effect.
+            val c = Offset(x0 + 32.dp.toPx(), top + ih / 2)
+            val a = (mod.tilt / tiltSpan(modsOn.tilt)).coerceIn(-1f, 1f) * 60f
+            val col = if (t.flat) Color.Black else if (mod.held) t.parts[0] else ink.copy(alpha = 0.55f)
+            val half = 20.dp.toPx()
+            drawLine(ink.copy(alpha = if (t.flat) 0.4f else 0.25f), Offset(c.x - half - 4f, c.y), Offset(c.x + half + 4f, c.y), strokeWidth = 2f)
+            rotate(a, pivot = c) {
+                val pw = 2 * half; val ph = 18.dp.toPx()
+                drawRoundRect(col, topLeft = Offset(c.x - pw / 2, c.y - ph / 2), size = Size(pw, ph), cornerRadius = CornerRadius(5.dp.toPx()),
+                              style = Stroke(width = 3.dp.toPx()))
+            }
+            val tx = x0 + 64.dp.toPx()
+            label(PhoneMods.TILT[modsOn.tilt].uppercase(), tx, top + 19.dp.toPx(), 11f, true, 0.7f)
+            label(if (mod.held || t.flat) tiltEffect(modsOn.tilt, mod) else "turn to play", tx, top + 39.dp.toPx(), 15f, mod.held,
+                  if (mod.held) 1f else 0.6f)
+            x0 += iw + gap
+        }
+        if (modsOn.breath != 0) {
+            box()
+            val b = mod.breath
+            val pad = 12.dp.toPx(); val by = top + ih - 16.dp.toPx(); val bh = 8.dp.toPx()
+            val col = if (t.flat) Color.Black else t.parts[1]
+            drawRoundRect(ink.copy(alpha = if (t.flat) 1f else 0.18f), Offset(x0 + pad, by), Size(iw - 2 * pad, bh), CornerRadius(bh / 2),
+                          style = if (t.flat) Stroke(width = 2f) else androidx.compose.ui.graphics.drawscope.Fill)
+            if (b > 0.005f) drawRoundRect(col, Offset(x0 + pad, by), Size((iw - 2 * pad) * b, bh), CornerRadius(bh / 2))
+            val name = if (modsOn.breath == 1) "BREATH · SWELL" else "BREATH · TONE"
+            label(name, x0 + pad, top + 19.dp.toPx(), 11f, true, 0.7f)
+            val hint = when {
+                PhoneControl.micState < 0 -> "no microphone"
+                b > 0.02f -> "%d%%".format((b * 100).roundToInt())
+                modsOn.breath == 1 && mod.held -> "blow to play"
+                else -> "blow on the mic"
+            }
+            text.textAlign = android.graphics.Paint.Align.RIGHT
+            label(hint, x0 + iw - pad, top + 19.dp.toPx(), 12f, b > 0.02f || mod.held, if (b > 0.02f) 1f else 0.7f)
+            text.textAlign = android.graphics.Paint.Align.LEFT
         }
     }
 

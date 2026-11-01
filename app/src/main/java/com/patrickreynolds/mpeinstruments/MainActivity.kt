@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
         startForegroundService(Intent(this, SynthService::class.java))
         MidiConnector.init(applicationContext)
         AppState.init(applicationContext)
+        Updater.checkIfDue(applicationContext)
         MidiConnector.onChange = { runOnUiThread { midiTick++ } }
         SynthService.onStopped = { runOnUiThread { finishAndRemoveTask() } }
         setContent {
@@ -101,7 +102,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onPause() { ble?.stop(); scanning = false; super.onPause() }
+    override fun onPause() { ble?.stop(); scanning = false; Motion.setResumed(this, false); super.onPause() }
+    override fun onResume() { super.onResume(); Motion.setResumed(this, true) }
 
     private fun requestNeededPermissions() {
         val want = mutableListOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
@@ -159,6 +161,13 @@ class MainActivity : ComponentActivity() {
         }
         if (padOpen) {
             BackHandler { showPad(false) }
+            // Tilt on: keep the pad the way up it is, or a firm turn would flip the screen mid-note.
+            val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+                android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            LaunchedEffect(AppState.mods.tilt != 0, landscape) {
+                requestedOrientation = if (AppState.mods.tilt != 0 && landscape) ActivityInfo.SCREEN_ORIENTATION_LOCKED
+                                       else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
             PadScreen { showPad(false) }
             return
         }
@@ -193,7 +202,7 @@ class MainActivity : ComponentActivity() {
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
                 when (tab) {
-                    0 -> PlayScreen(stats) { showPad(true) }
+                    0 -> PlayScreen(stats, openPad = { showPad(true) }, openSetup = { tab = 3 })
                     1 -> PerformScreen()
                     2 -> SoundScreen()
                     else -> SetupScreen(stats, SetupActions(bleFound, scanning, ::scanBle, ::stopApp), tick)

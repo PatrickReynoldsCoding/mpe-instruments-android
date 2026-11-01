@@ -9,6 +9,6 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine engine)
 
 find_package(oboe REQUIRED CONFIG)
 
-add_library(mpeandroid SHARED jni.cpp Synth.cpp)
+add_library(mpeandroid SHARED jni.cpp Synth.cpp Mic.cpp)
 target_compile_options(mpeandroid PRIVATE -Wall -Wextra -O3)
 target_link_libraries(mpeandroid mpe_engine oboe::oboe amidi android log)

@@ -90,6 +90,8 @@ struct Engine::Part {
 
 static float smoothTo(float cur, float target, float coef) { return cur + (target - cur) * coef; }
 static float noteToHz(float note) { return 440.f * std::pow(2.f, (note - 69.f) / 12.f); }
+static float clampf(float x, float lo, float hi) { return std::min(std::max(x, lo), hi); }
+static float deadZone(float x, float d) { return x > d ? x - d : x < -d ? x + d : 0.f; }
 
 // Master effects (a Faust reverb and a delay) and each part's tone and drive.
 struct Engine::Fx {
@@ -113,7 +115,13 @@ struct Engine::Fx {
 
 Engine::Engine(int sampleRate)
     : sr_(sampleRate), ch_(new Channel[kChannels]), parts_(new Part[2]), fx_(new Fx(sampleRate)),
-      pubVoices_(new PubVoice[2 * kChannels]), pubFingers_(new PubFinger[kChannels]) {}
+      pubVoices_(new PubVoice[2 * kChannels]), pubFingers_(new PubFinger[kChannels]) {
+    // A 150 Hz low-pass (2nd order), the same band the breath detector listens to.
+    const float w0 = 2.f * float(M_PI) * 150.f / sr_, cw = std::cos(w0), al = std::sin(w0) / (2.f * 0.7071f), a0 = 1.f + al;
+    lowB_[0] = (1.f - cw) / 2.f / a0; lowB_[1] = (1.f - cw) / a0; lowB_[2] = lowB_[0];
+    lowB_[3] = -2.f * cw / a0; lowB_[4] = (1.f - al) / a0;
+    lowRel_ = 1.f - std::exp(-1.f / (0.15f * sr_));
+}
 
 Engine::~Engine() {
     for (int p = 0; p < 2; p++) { delete parts_[p].set; delete pending_[p].exchange(nullptr); }
@@ -314,9 +322,73 @@ float Engine::assisted(float pitch, float& pull, float& prev, float& speed, floa
     return pitch + (nearest + perf_.scaleRoot - pitch) * pull;
 }
 
+// Tilt and breath, once per callback (a few ms): what every voice gets added this time.
+void Engine::updateModifiers(float dt) {
+    auto coef = [&](float tau) { return 1.f - std::exp(-dt / tau); };
+    bool held = false;
+    for (int ch = 1; ch < kChannels; ch++) held = held || ch_[ch].note >= 0;
+
+    const TiltMode tm = TiltMode(tiltMode_.load(std::memory_order_relaxed));
+    const float amount = tiltAmount_.load(std::memory_order_relaxed);
+    const float ang = tiltDeg_.load(std::memory_order_relaxed);
+    if (!tiltStarted_ || tm != tiltNow_) { tiltZero_ = tiltPrev_ = ang; tiltHp1_ = tiltHp2_ = 0; tiltStarted_ = true; }
+    tiltNow_ = tm;
+    // The wobble: the angle through two high-pass stages at 2 Hz. A 5 Hz vibrato comes through
+    // (86%); a held slant gives 0, and so does a slow turn once it stops.
+    const float a = 1.f / (1.f + dt * 2.f * float(M_PI) * 2.f);
+    const float hp1 = tiltHp1_;
+    tiltHp1_ = a * (tiltHp1_ + ang - tiltPrev_);
+    tiltHp2_ = a * (tiltHp2_ + tiltHp1_ - hp1);
+    tiltPrev_ = ang;
+    // The zero: wherever the phone is while no finger is down. So the first note is always in tune.
+    if (!held) tiltZero_ = smoothTo(tiltZero_, ang, coef(0.1f));
+    const float rel = ang - tiltZero_;
+    float bend = 0, slide = 0, shown = 0;
+    switch (tm) {
+    case TiltMode::Vibrato:              // amount: cents at a 3.5 degree wobble; a tremor under 0.2 degrees is ignored
+        shown = tiltHp2_;
+        bend = clampf(deadZone(tiltHp2_, 0.2f) / 3.3f, -1.5f, 1.5f) * amount / 100.f;
+        break;
+    case TiltMode::Bend:                 // amount: semitones at 30 degrees; the first 2 degrees do nothing
+        shown = rel;
+        bend = clampf(deadZone(rel, 2.f) / 28.f, -1.f, 1.f) * amount;
+        break;
+    case TiltMode::Tone:                 // amount: slide change at 30 degrees
+        shown = rel;
+        slide = clampf(deadZone(rel, 1.5f) / 28.5f, -1.f, 1.f) * amount;
+        break;
+    default: break;
+    }
+    modBend_ = smoothTo(modBend_, bend, coef(0.005f));
+    modSlide_ = smoothTo(modSlide_, slide, coef(0.02f));
+
+    breathNow_ = BreathMode(breathMode_.load(std::memory_order_relaxed));
+    const float b = breathNow_ == BreathMode::Off ? 0.f : clampf(breathIn_.load(std::memory_order_relaxed), 0.f, 1.f);
+    breath_ = smoothTo(breath_, b, coef(b > breath_ ? 0.003f : 0.012f));
+    // Breath tone: the parts' low-pass, from dark (about 550 Hz) to the part's own brightness.
+    toneOpen_ = breathNow_ == BreathMode::Tone ? 0.12f + 0.88f * breath_ : smoothTo(toneOpen_, 1.f, coef(0.02f));
+
+    pubTilt_.store(shown, std::memory_order_relaxed);
+    pubBend_.store(modBend_, std::memory_order_relaxed);
+    pubSlide_.store(modSlide_, std::memory_order_relaxed);
+    pubBreath_.store(breathNow_ == BreathMode::Off ? 0.f : breath_, std::memory_order_relaxed);
+    pubHeld_.store(held, std::memory_order_relaxed);
+}
+
+ModView Engine::modifiers() const {
+    ModView m;
+    m.tilt = pubTilt_.load(std::memory_order_relaxed);
+    m.bend = pubBend_.load(std::memory_order_relaxed);
+    m.slide = pubSlide_.load(std::memory_order_relaxed);
+    m.breath = pubBreath_.load(std::memory_order_relaxed);
+    m.held = pubHeld_.load(std::memory_order_relaxed);
+    return m;
+}
+
 void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
     Part& P = parts_[p];
     if (!P.set) return;
+    const bool swell = breathNow_ == BreathMode::Swell;
     const int transpose = transpose_.load() + perf_.part[p].transpose;
     const float velScale = velocityScale_.load(), gain = perf_.part[p].volume;
     auto coef = [&](float tau) { return 1.f - std::exp(-dt / tau); };
@@ -346,6 +418,10 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
             if (f.noteOnCount == v.fingerNoteOn && f.note >= 0) { v.bend = f.bend; v.pressure = f.pressure; v.slide = f.slide; }
         }
         const float target = v.note + transpose + v.bend;
+        // The phone's tilt and breath. Tilt bends after pitch assist, so a deliberate bend or
+        // vibrato is not pulled back onto the scale.
+        const float pressT = swell ? breath_ : v.pressure;
+        const float slideT = modSlide_ == 0.f ? v.slide : clampf(v.slide + modSlide_, 0.f, 1.f);
 
         if (v.start) {                                           // a new note on this voice
             v.start = false;
@@ -354,19 +430,19 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
             v.prevPitch = target;
             v.speed = 0;
             v.pull = perf_.scaleMask ? perf_.assist : 0.f;
-            v.pitch = assisted(target, v.pull, v.prevPitch, v.speed, dt);
+            v.pitch = assisted(target, v.pull, v.prevPitch, v.speed, dt) + modBend_;
             v.freq = noteToHz(v.pitch);
-            v.pressureS = v.pressure;
-            v.slideS = v.slide;
+            v.pressureS = pressT;
+            v.slideS = slideT;
             sl.d->instanceClear();                               // so `gate > gate'` sees a clean 0 -> 1
         }
         if (!v.sounding) continue;
 
         if (v.gate) {                                            // after release, freeze pitch so ringing notes don't drift
-            v.pitch = assisted(target, v.pull, v.prevPitch, v.speed, dt);
+            v.pitch = assisted(target, v.pull, v.prevPitch, v.speed, dt) + modBend_;
             v.freq = smoothTo(v.freq, noteToHz(v.pitch), cFreq);
-            v.pressureS = smoothTo(v.pressureS, v.pressure, cPress);
-            v.slideS = smoothTo(v.slideS, v.slide, cSlide);
+            v.pressureS = smoothTo(v.pressureS, pressT, cPress);
+            v.slideS = smoothTo(v.slideS, slideT, cSlide);
         }
         v.freq = std::min(std::max(v.freq, 20.f), 5000.f);
 
@@ -401,14 +477,17 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
 // A part's tone (12 dB/octave low-pass, 300 Hz .. open) and drive.
 void Engine::partFx(int p, float* l, float* r, int n) {
     const PartConfig& c = perf_.part[p];
-    if (c.brightness < 0.999f) {
-        const float fc = 300.f * std::pow(2.f, std::max(0.f, c.brightness) * 6.f);   // 300 Hz .. 19 kHz
+    const float bright = std::min(c.brightness, 1.f) * toneOpen_;          // breath tone closes it further
+    float* st = fx_->tone[p];
+    if (bright < 0.999f) {
+        const float fc = 300.f * std::pow(2.f, std::max(0.f, bright) * 6.f);   // 300 Hz .. 19 kHz
         const float a = 1.f - std::exp(-2.f * float(M_PI) * fc / sr_);
-        float* st = fx_->tone[p];
         for (int i = 0; i < n; i++) {
             st[0] += (l[i] - st[0]) * a; st[1] += (st[0] - st[1]) * a; l[i] = st[1];
             st[2] += (r[i] - st[2]) * a; st[3] += (st[2] - st[3]) * a; r[i] = st[3];
         }
+    } else if (n > 0) {
+        st[0] = st[1] = l[n - 1]; st[2] = st[3] = r[n - 1];                  // so switching it on later does not click
     }
     if (c.drive > 0.001f) {
         const float k = 1.f + c.drive * 8.f, makeup = 1.f / std::sqrt(k);
@@ -553,6 +632,8 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
         panics_++;
     }
 
+    updateModifiers(float(frames) / sr_);
+
     const float vol = volume_.load();
     float mixL[kMaxBlock], mixR[kMaxBlock], partL[kMaxBlock], partR[kMaxBlock];
     float revL[kMaxBlock], revR[kMaxBlock], delL[kMaxBlock], delR[kMaxBlock];
@@ -597,6 +678,15 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
             std::fill(partR, partR + n, 0.f);
             renderVoices(p, partL, partR, n, dt);
             partFx(p, partL, partR, n);
+            // Breath swell: the part's loudness follows the breath (before the effects, so the
+            // reverb and delay ring on when the breath stops). Smoothed per sample: no zipper.
+            const float gt = breathNow_ == BreathMode::Swell ? breath_ : 1.f;
+            if (gt < 0.9999f || gain_[p] < 0.9999f) {
+                const float k = 1.f - std::exp(-1.f / (0.003f * sr_));
+                float g = gain_[p];
+                for (int i = 0; i < n; i++) { g += (gt - g) * k; partL[i] *= g; partR[i] *= g; }
+                gain_[p] = gt >= 0.9999f && g > 0.9995f ? 1.f : g;
+            }
             const float rs = perf_.part[p].reverb, ds = perf_.part[p].delay;
             for (int i = 0; i < n; i++) {
                 mixL[i] += partL[i]; mixR[i] += partR[i];
@@ -606,8 +696,20 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
         }
         masterFx(mixL, mixR, revL, revR, delL, delR, n);
         for (int i = 0; i < n; i++) {                                // soft limiter
-            out[2 * (done + i)] = std::tanh(mixL[i] * vol * 1.5f) * 0.7f;
-            out[2 * (done + i) + 1] = std::tanh(mixR[i] * vol * 1.5f) * 0.7f;
+            const float l = std::tanh(mixL[i] * vol * 1.5f) * 0.7f, r = std::tanh(mixR[i] * vol * 1.5f) * 0.7f;
+            out[2 * (done + i)] = l;
+            out[2 * (done + i) + 1] = r;
+            // The low end of what goes to the speaker, two passes of the low-pass (24 dB/octave).
+            float x = 0.5f * (l + r);
+            for (int k = 0; k < 2; k++) {
+                float* z = lowZ_ + 2 * k;
+                const float y = lowB_[0] * x + z[0];
+                z[0] = lowB_[1] * x - lowB_[3] * y + z[1];
+                z[1] = lowB_[2] * x - lowB_[4] * y;
+                x = y;
+            }
+            const float pw = x * x;
+            lowEnv_ = pw > lowEnv_ ? pw : lowEnv_ + (pw - lowEnv_) * lowRel_;
         }
         done += n;
     }
@@ -615,6 +717,8 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
     for (int p = 0; p < 2; p++) for (int i = 1; i < kChannels; i++) voices += parts_[p].v[i].sounding;
     activeVoices_ = voices;
     frameCounter_ += frames;
+    if (!std::isfinite(lowEnv_)) { lowEnv_ = 0; for (float& z : lowZ_) z = 0; }
+    lowDb_.store(10.f * std::log10(lowEnv_ + 1e-12f), std::memory_order_relaxed);
     publish();
 
     const double spent = (steadyNowNs() - t0) / 1e9, budget = double(frames) / sr_;

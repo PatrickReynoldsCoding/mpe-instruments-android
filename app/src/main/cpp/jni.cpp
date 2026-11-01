@@ -9,7 +9,7 @@ static Synth& synth() { static Synth s; return s; }
 #define FN(ret, name) extern "C" JNIEXPORT ret JNICALL Java_com_patrickreynolds_mpeinstruments_Native_##name
 
 FN(jboolean, nativeStart)(JNIEnv*, jobject) { return synth().start(); }
-FN(void, nativeStop)(JNIEnv*, jobject) { synth().stop(); }
+FN(void, nativeStop)(JNIEnv*, jobject) { synth().stop(); synth().stopMic(); }
 
 FN(jboolean, nativeAttachMidi)(JNIEnv* env, jobject, jobject device, jint port) {
     return synth().attachMidi(env, device, port);
@@ -102,6 +102,19 @@ FN(void, nativeSetBendRange)(JNIEnv*, jobject, jfloat s) { synth().setBendRange(
 FN(void, nativeSetWatchdogMs)(JNIEnv*, jobject, jint ms) { synth().setWatchdogMs(ms); }
 FN(void, nativePanic)(JNIEnv*, jobject) { synth().panic(); }
 FN(void, nativeResetLatencyTuner)(JNIEnv*, jobject) { synth().resetLatencyTuner(); }
+
+// The phone as a controller (see Synth.h).
+FN(void, nativeSetTilt)(JNIEnv*, jobject, jfloat degrees) { synth().setTilt(degrees); }
+FN(void, nativeSetTiltMode)(JNIEnv*, jobject, jint mode, jfloat amount) { synth().setTiltMode(mode, amount); }
+FN(jint, nativeSetBreath)(JNIEnv*, jobject, jint mode, jfloat sensitivity) { return synth().setBreath(mode, sensitivity); }
+FN(void, nativeDebugBreath)(JNIEnv*, jobject, jfloat level) { synth().setBreathOverride(level); }
+FN(jint, nativeModifiers)(JNIEnv* env, jobject, jfloatArray out) {
+    float v[Synth::kModCount];
+    synth().fillModifiers(v);
+    const int n = std::min<int>(Synth::kModCount, env->GetArrayLength(out));
+    env->SetFloatArrayRegion(out, 0, n, v);
+    return n;
+}
 
 FN(jdoubleArray, nativeStats)(JNIEnv* env, jobject) {
     double v[Synth::kStatCount];

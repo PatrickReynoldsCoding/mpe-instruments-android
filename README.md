@@ -29,7 +29,25 @@ What it does:
   six colour themes and soft, clear or bold lines.
 - **An e-ink look** (Setup): black on white, thick borders, no colour or motion, and the pad only
   redraws when something changes.
+- **The phone as a controller** (experimental: Setup → Experimental), on every instrument, from
+  the pad or a Seaboard:
+  - **Tilt** (the gyro): turn the phone like a steering wheel for vibrato (only the wobble
+    counts, so a slant stays in tune), a bend (each note starts in tune wherever the phone is),
+    or a change of tone.
+  - **Breath** (the microphone): blow across its bottom edge. Swell makes breath the loudness, so
+    fingers only pick the notes. Tone opens the sound from dark to bright, like a wah.
+  - Both show what they are doing: a gauge with a little phone that turns as yours does, and a
+    breath meter (in Setup, and in the pad's Tilt and Breath panels, which join the pad's rail
+    once one is on), plus a live readout along the top of the pad, orbs that move with the bend,
+    and a glow that rises as you blow.
+  - Only the microphone's loudness below 150 Hz is measured; nothing is recorded. Through the
+    speaker the app ignores its own bass, so a note cannot keep itself playing.
 - **An octave warning** when the controller's notes are far from the instrument's range.
+- **Updates from inside the app** (Setup → Updates): it asks GitHub for the latest release when
+  it opens (at most once a day; can be turned off), downloads the APK, checks that it is this app,
+  newer, and signed with the same key, and hands it to Android, which asks you to confirm. The
+  first time, Android also asks you to allow MPE Instruments to install apps. GitHub is the only
+  place the app ever connects to.
 - Bluetooth reconnects by itself (can be turned off); Stop turns everything off.
 
 Status: the engine is tested on the desktop (sanitizers included), the app on an emulator with
@@ -41,6 +59,20 @@ USB. Bluetooth with the real Seaboard is not tested yet.
 Download `MPE-Instruments-<version>.apk` from the [Releases](../../releases) page on the phone and
 open it (allow installing from your browser or file manager when Android asks). Android 12 or
 newer.
+
+From 0.5.0 on, later versions can be installed from inside the app (Setup → Updates).
+
+## Releasing
+
+For the in-app updater to offer and accept a release:
+
+- tag it `vX.Y.Z` and publish it (drafts and pre-releases are skipped);
+- attach one `.apk`, the release build (`gradle assembleRelease`), signed with the same key as
+  before: the app refuses an update signed with another key, and so does Android;
+- raise `versionCode` and `versionName` in `app/build.gradle.kts`.
+
+To try the updater, build an older-numbered release copy, install it, and update it from the app:
+`gradle assembleRelease -Pmpe.versionCode=3 -Pmpe.versionName=0.3.9`.
 
 ## Build and test
 

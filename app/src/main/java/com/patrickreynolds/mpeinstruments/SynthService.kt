@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
@@ -15,6 +16,7 @@ class SynthService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) { stop(this); return START_NOT_STICKY }
+        if (intent?.action == ACTION_REFRESH) { promote(); return START_NOT_STICKY }
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Playing", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
@@ -29,11 +31,30 @@ class SynthService : Service() {
                                          PendingIntent.FLAG_IMMUTABLE)).build())
             .setOngoing(true)
             .build()
-        startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-        Native.nativeStart()
+        this.notification = notification
         AppState.init(applicationContext)            // the saved instruments and settings, also when started without the screen
+        promote()
+        Native.nativeStart()
+        PhoneControl.apply(applicationContext, AppState.mods)   // Stop closed the microphone; open it again if breath is on
         MidiConnector.init(applicationContext)
         return START_NOT_STICKY
+    }
+
+    private var notification: Notification? = null
+
+    /**
+     * Foreground, as media playback, and as a microphone user while breath is on: without that
+     * Android hands an app in the background silence instead of the microphone.
+     */
+    private fun promote() {
+        val n = notification ?: return
+        val mic = AppState.mods.breath != 0 && PhoneControl.hasMicPermission(this)
+        val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or (if (mic) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+        try {
+            startForeground(1, n, types)
+        } catch (e: RuntimeException) {             // not allowed now (e.g. started from the background)
+            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        }
     }
 
     override fun onDestroy() {
@@ -45,6 +66,12 @@ class SynthService : Service() {
     companion object {
         private const val CHANNEL = "playing"
         private const val ACTION_STOP = "com.patrickreynolds.mpeinstruments.STOP"
+        private const val ACTION_REFRESH = "com.patrickreynolds.mpeinstruments.REFRESH"
+
+        /** Breath was turned on or off: update what the service says it uses. Call while the app is on screen. */
+        fun refresh(context: Context) {
+            runCatching { context.startForegroundService(Intent(context, SynthService::class.java).setAction(ACTION_REFRESH)) }
+        }
         /** Called when the user stops the app; the screen listens to close itself. */
         var onStopped: (() -> Unit)? = null
 

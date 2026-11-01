@@ -89,7 +89,7 @@ string(APPEND REG "  return v;\n}\nconst InstrumentInfo* instruments(int& count)
 file(WRITE "${GEN_DIR}/registry.cpp.tmp" "${REG}")
 configure_file("${GEN_DIR}/registry.cpp.tmp" "${GEN_DIR}/registry.cpp" COPYONLY)
 
-add_library(mpe_engine STATIC src/clean.cpp src/engine.cpp "${GEN_DIR}/registry.cpp" ${INSTR_SOURCES})
+add_library(mpe_engine STATIC src/clean.cpp src/engine.cpp src/breath.cpp "${GEN_DIR}/registry.cpp" ${INSTR_SOURCES})
 target_include_directories(mpe_engine PUBLIC include)
 target_include_directories(mpe_engine SYSTEM PUBLIC "${FAUST_INCLUDE_DIR}")
 target_compile_options(mpe_engine PRIVATE -Wall -Wextra)

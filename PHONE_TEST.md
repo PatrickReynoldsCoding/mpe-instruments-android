@@ -59,9 +59,52 @@ the Seaboard's own scan time or the USB/Bluetooth transfer. To get the real figu
 Send the videos; the gap between the finger landing and the sound is counted frame by frame
 (at 240 fps one frame is about 4 ms).
 
+## 6. Tilt and breath
+
+The emulator checks that both reach the sound (a turn bends by the right amount, the right way
+round; breath silences and sounds a held note). What it cannot show: how they feel, and how the
+phone's own speaker and microphone get on. Setup tab, section **Experimental**. Once one is on, it
+also appears on the touch pad's side rail.
+
+**Tilt.** Choose **Bend**. Open the touch pad, hold a note and turn the phone like a steering
+wheel: clockwise bends up, and the little phone at the top turns with you. Let go, hold the phone
+at a slant, play again: the new note must start in tune. The screen must not flip round while
+tilt is on. Then **Vibrato**: wobble the phone while holding a note; holding it still at a slant
+must stay in tune. Is the depth right at the default 40 cents? Does pressing the screen with your
+thumb wobble the pitch by itself? Then **Tone**.
+
+**Breath.** Choose **Swell** and allow the microphone. On the pad, hold a note: silence. Blow
+across the bottom edge of the phone: the note swells, and the meter on the Play tab (or the
+pad's Breath panel) fills. Note the two numbers under the meter, "room" and "starts".
+
+1. **Does it come and go when you want?** Short puffs, a long steady breath (listen for a
+   flutter in the loudness), and the moment you stop (it should die away within a fifth of a
+   second or so).
+2. **The speaker test, the important one.** Phone speaker at full volume, no headphones,
+   instrument **Bass** or **Cello**. Play low notes, blow once, stop. The sound must die away. If it
+   carries on by itself, the app is hearing its own sound as breath: screenshot the meter (the
+   red tick is the app's own sound, which breath has to beat) and say so. The detector assumes
+   the speaker reaches the microphone at most 24 dB down; that number may need changing.
+3. **Latency.** Write down the "ms" in the status line with breath off, then on. Opening the
+   microphone can make Android choose a slower output path.
+4. **Screen off.** With the Seaboard over USB and breath on, turn the screen off and blow: it must
+   still work (the green microphone dot stays on).
+5. **Sensitivity.** Too hard to start a note, or does talking or a fan set it off? Try the slider.
+
+## 7. Updating from the app
+
+0.5.0 is the first version that can update itself, so install it by hand once. When the next
+release is out, the Play tab says so. Setup → Updates → **Update to …**. The first time,
+Android sends you to "Install unknown apps" for MPE Instruments: turn it on and come back, and the
+install carries on. Xiaomi phones may show their own scan screen first. The app closes while
+Android replaces it; reopen it and check the version at the bottom of Setup. Your presets and
+settings must still be there.
+
 ## What to send back
 
 - The `captures/phone-*.txt` file from step 2 (it is saved in the repo folder).
 - Screenshots from steps 3 and 4.
 - Anything that felt wrong: notes that hang, late or uneven notes, crackles.
 - The videos from step 5.
+- From step 6: the "room" and "starts" numbers, the latency with breath off and on, and whether
+  the speaker test passed.
