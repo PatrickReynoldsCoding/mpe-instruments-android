@@ -47,7 +47,7 @@ foreach(rel ${DSP_FILES})
   set(gen "${GEN_DIR}/${fn}.cpp")
   add_custom_command(
     OUTPUT "${gen}"
-    COMMAND ${FAUST_EXECUTABLE} -I "${MPE_INSTRUMENTS_DIR}/lib" -lang cpp -i -cn ${cls} -o "${gen}"
+    COMMAND ${FAUST_EXECUTABLE} -I "${MPE_INSTRUMENTS_DIR}/lib" -lang cpp -i -vec -vs 32 -cn ${cls} -o "${gen}"
             "${MPE_INSTRUMENTS_DIR}/instruments/${rel}"
     DEPENDS "${MPE_INSTRUMENTS_DIR}/instruments/${rel}" ${MPE_LIBS}
     COMMENT "faust ${id}")
