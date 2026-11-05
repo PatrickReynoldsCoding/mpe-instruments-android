@@ -190,6 +190,32 @@ int main() {
         auto again = r.run(0.5);
         CHECK(rms(again, size_t(0.3 * kSr), again.size()) > 0.5 * one[0], "a new note on that finger plays at full level");
     }
+    {   // the drum kit: every note of the octave is a drum, struck, and dies away on its own
+        auto bright = [](const std::vector<float>& x) {            // how much of it is high frequencies
+            double d = 0, e = 0;
+            for (size_t i = 1; i < x.size(); i++) { d += double(x[i] - x[i - 1]) * (x[i] - x[i - 1]); e += double(x[i]) * x[i]; }
+            return std::sqrt(d / (e + 1e-20));
+        };
+        const char* names[12] = {"kick", "rim", "snare", "clap", "crash", "low tom", "closed hat", "mid tom",
+                                 "pedal hat", "high tom", "open hat", "cowbell"};
+        double brightness[12];
+        for (int k = 0; k < 12; k++) {
+            Rig r("drums/kit");
+            r.noteOn(1, 36 + k, 100);
+            auto x = r.run(0.3);
+            r.noteOff(1, 36 + k);
+            auto tail = r.run(4.0);
+            CHECK(finite(x) && peak(x) <= 1.0f && peak(x) > 0.05f, "drums: %s sounds (peak %.2f)", names[k], peak(x));
+            CHECK(rms(tail, tail.size() - size_t(0.3 * kSr), tail.size()) < 0.05 * peak(x), "drums: %s dies away", names[k]);
+            brightness[k] = bright(x);
+        }
+        CHECK(brightness[0] < 0.3 * brightness[6] && brightness[0] < 0.3 * brightness[10],
+              "drums: the kick is dark, the hats bright (%.3f vs %.3f, %.3f)", brightness[0], brightness[6], brightness[10]);
+        Rig r("drums/kit");                                // the same drum in any octave
+        r.noteOn(1, 60, 100);
+        auto c4 = r.run(0.3);
+        CHECK(bright(c4) < 0.3 * brightness[6], "drums: C in another octave is the kick too");
+    }
     {   // latency bookkeeping: a message that arrived 5 ms before the block started
         Rig r("strings/cello");
         const uint8_t press[2] = {0xD1, 10};

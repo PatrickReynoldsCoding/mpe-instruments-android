@@ -49,6 +49,18 @@ object AppState {
     /** Which pad of a split the rail is changing: 0 left, 1 right. */
     var padSide by mutableStateOf(0)
 
+    /** Sound slots: a whole part's sound each (instrument, effects, arp), one tap to switch to. */
+    var slots by mutableStateOf<List<Part?>>(DEFAULT_SLOTS)
+        private set
+    /** The looper's buttons on the touch pad, and whether a loop's length snaps to beats. */
+    var loopDock by mutableStateOf(true)
+        private set
+    var loopSnap by mutableStateOf(true)
+        private set
+    /** Each loop layer's volume and mute (the loop itself is not kept). */
+    var loopLayers by mutableStateOf(List(Looper.MAX_LAYERS) { 1f to false })
+        private set
+
     /** Tilt and breath: the phone as a controller; not part of a preset. */
     var mods by mutableStateOf(PhoneMods())
         private set
@@ -78,6 +90,12 @@ object AppState {
         pads = listOf(p0, p1)
         padSplitAt = prefs.getFloat("padSplitAt", 0.5f).coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN)
         mods = runCatching { PhoneMods.from(prefs.getString("mods", null)?.let { JSONObject(it) }) }.getOrDefault(PhoneMods())
+        slots = runCatching {
+            val a = JSONArray(prefs.getString("slots", null) ?: return@runCatching DEFAULT_SLOTS)
+            List(SLOT_COUNT) { k -> a.optJSONObject(k)?.let { Part.from(it) } }
+        }.getOrDefault(DEFAULT_SLOTS)
+        loopDock = prefs.getBoolean("loopDock", true)
+        loopSnap = prefs.getBoolean("loopSnap", true)
         userPresets = runCatching {
             val a = JSONArray(prefs.getString("presets", "[]"))
             (0 until a.length()).map { a.getJSONObject(it).let { o -> Preset(o.getString("name"), Perf.from(o.getJSONObject("perf"))) } }
@@ -93,6 +111,30 @@ object AppState {
         applyInstruments(null)
         Native.nativeSetPerformance(perf.toArray())
         PhoneControl.apply(appContext, mods)
+        Looper.snap(loopSnap)
+    }
+
+    // ---- sound slots and the looper ----------------------------------------------------------
+
+    /** Play slot k's sound on part [side]. */
+    fun loadSlot(k: Int, side: Int) { slots.getOrNull(k)?.let { s -> updatePart(side) { s } } }
+    /** Keep part [side]'s sound in slot k (null empties it). */
+    fun saveSlot(k: Int, part: Part?) {
+        slots = slots.mapIndexed { i, s -> if (i == k) part else s }
+        val a = JSONArray()
+        for (s in slots) a.put(s?.json() ?: JSONObject.NULL)
+        prefs.edit().putString("slots", a.toString()).apply()
+    }
+    fun changeLoopDock(on: Boolean) { loopDock = on; prefs.edit().putBoolean("loopDock", on).apply() }
+    fun changeLoopSnap(on: Boolean) { loopSnap = on; Looper.snap(on); prefs.edit().putBoolean("loopSnap", on).apply() }
+    fun changeLoopLayer(i: Int, volume: Float, muted: Boolean) {
+        loopLayers = loopLayers.mapIndexed { k, l -> if (k == i) volume to muted else l }
+        Looper.layer(i, volume, muted)
+    }
+    /** After a clear or an undo the layers start again at full volume, unmuted. */
+    fun resetLoopLayers(from: Int = 0) {
+        loopLayers = loopLayers.mapIndexed { k, l -> if (k >= from) 1f to false else l }
+        for (k in from until Looper.MAX_LAYERS) Looper.layer(k, 1f, false)
     }
 
     private fun index(id: String) = instruments.indexOfFirst { it.id == id }.takeIf { it >= 0 }
@@ -229,3 +271,14 @@ val BUILT_IN_PRESETS = listOf(
 
 /** The narrowest a pad of a split can be, as a fraction of the screen. */
 const val PAD_SPLIT_MIN = 0.2f
+
+const val SLOT_COUNT = 6
+/** The slots to begin with: a spread of sounds to loop together. */
+val DEFAULT_SLOTS: List<Part?> = listOf(
+    Part(instrument = "drums/kit", reverb = 0.08f),
+    Part(instrument = "plucked/nylon-guitar", reverb = 0.15f),
+    Part(instrument = "strings/cello", reverb = 0.2f),
+    Part(instrument = "synths/pad", reverb = 0.3f),
+    Part(instrument = "synths/lead", reverb = 0.12f, delay = 0.15f),
+    null,
+)

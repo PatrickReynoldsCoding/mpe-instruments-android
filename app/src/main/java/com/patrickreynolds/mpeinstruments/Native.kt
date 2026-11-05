@@ -45,6 +45,10 @@ object Native {
     external fun nativeSetBreath(mode: Int, sensitivity: Float): Int
     /** Debug: a fixed breath level in place of the microphone's; < 0 = the microphone again. */
     external fun nativeDebugBreath(level: Float)
+    /** The looper. op: 0 press, 1 undo, 2 clear, 3 pause (flag), 4 a layer's volume and mute, 5 snap to beats (flag). */
+    external fun nativeLoop(op: Int, layer: Int, vol: Float, flag: Boolean)
+    /** The looper's state, 14 floats: see Looper.kt. */
+    external fun nativeLoopView(out: FloatArray)
     /** What the gyro and breath are doing, 21 floats: see ModReading. */
     external fun nativeModifiers(out: FloatArray): Int
 

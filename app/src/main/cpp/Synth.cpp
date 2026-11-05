@@ -91,6 +91,7 @@ bool Synth::open() {
     eng->setBendRange(bendRange_);
     eng->setWatchdogMs(watchdogMs_);
     applyGyro(*eng);
+    eng->looper().setSnap(loopSnap_);
     eng->setBreathMode(mpe::BreathMode(breathMode_.load()));
     eng->setInstrument(0, instrument_[0]);
     if (instrument_[1] >= 0) eng->setInstrument(1, instrument_[1]);
@@ -345,6 +346,35 @@ int Synth::setBreath(int mode, float sensitivity) {
     if (breathMode_ != 0) mic_.start();
     else mic_.stop();
     return mic_.state();
+}
+
+void Synth::loop(int op, int layer, float vol, bool flag) {
+    if (op == 5) loopSnap_ = flag;
+    auto e = engine();
+    if (!e) return;
+    mpe::Looper& l = e->looper();
+    switch (op) {
+    case 0: l.press(); break;
+    case 1: l.undo(); break;
+    case 2: l.clear(); break;
+    case 3: l.setPaused(flag); break;
+    case 4: l.setLayer(layer, vol, flag); break;
+    case 5: l.setSnap(flag); break;
+    default: break;
+    }
+    l.collect();
+}
+
+// Order must match Looper.kt.
+void Synth::fillLoop(float o[kLoopCount]) {
+    std::fill(o, o + kLoopCount, 0.f);
+    auto e = engine();
+    if (!e) return;
+    e->looper().collect();
+    const mpe::LoopView v = e->looper().view();
+    o[0] = float(int(v.state)); o[1] = float(v.length); o[2] = float(v.pos); o[3] = float(v.layers);
+    o[4] = v.paused ? 1.f : 0.f; o[5] = float(e->sampleRate());
+    for (int i = 0; i < 8; i++) o[6 + i] = v.level[i];
 }
 
 // Order must match PhoneMods.kt (ModReading).

@@ -68,6 +68,12 @@ public:
     static constexpr int kModCount = 21;
     void fillModifiers(float out[kModCount]);
     void applyGyro(mpe::Engine& e);
+    // The looper (see mpe/looper.h). op: 0 press, 1 undo, 2 clear, 3 pause (flag), 4 a layer's
+    // volume and mute (layer, vol, flag), 5 snap to beats (flag). The loop lives in the engine:
+    // if the audio stream has to be reopened, it is lost.
+    void loop(int op, int layer, float vol, bool flag);
+    static constexpr int kLoopCount = 14;            // state, length, pos, layers, paused, rate, level[8]
+    void fillLoop(float out[kLoopCount]);
 
     // Everything the status line shows. Order is fixed: see Stats.kt.
     static constexpr int kStatCount = 21;
@@ -136,6 +142,7 @@ private:
     float gyroAmount_[4] = {}, bendSnap_ = 0;
     bool bendReset_ = true;
     std::atomic<float> motion_[4] = {};
+    std::atomic<bool> loopSnap_{true};
 
     // settings
     std::atomic<int> instrument_[2] = {{0}, {-1}}, transpose_{0}, watchdogMs_{0};

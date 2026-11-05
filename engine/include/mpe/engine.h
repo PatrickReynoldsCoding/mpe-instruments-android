@@ -12,6 +12,7 @@
 #include "mpe/clean.h"
 #include "mpe/midi.h"
 #include "mpe/spsc.h"
+#include "mpe/looper.h"
 
 class dsp;   // Faust
 
@@ -187,6 +188,9 @@ public:
     // Any thread: the output below 150 Hz in dBFS, peak-held for 150 ms (for mpe::Breath::setEcho).
     float outputLowDb() const { return lowDb_.load(std::memory_order_relaxed); }
 
+    // The looper (any thread may read its view; the control thread presses its buttons).
+    Looper& looper() { return *looper_; }
+
     int sampleRate() const { return sr_; }
     int currentInstrument(int part = 0) const { return current_[part]; }
     Stats stats() const;
@@ -216,6 +220,8 @@ private:
     std::unique_ptr<Channel[]> ch_;
     std::unique_ptr<Part[]> parts_;                 // 2; audio thread owns
     std::unique_ptr<Fx> fx_;
+    std::unique_ptr<Looper> looper_;
+    bool noteStarted_ = false;                      // a note started since the looper last looked
     std::atomic<InstrumentSet*> pending_[2] = {};
     Spsc<InstrumentSet*> retired_{8};
     std::atomic<int> current_[2] = {{-1}, {-1}};

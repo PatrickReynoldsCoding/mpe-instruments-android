@@ -119,6 +119,12 @@ FN(void, nativeSetGyro)(JNIEnv* env, jobject, jintArray targets, jfloatArray amo
 }
 FN(jint, nativeSetBreath)(JNIEnv*, jobject, jint mode, jfloat sensitivity) { return synth().setBreath(mode, sensitivity); }
 FN(void, nativeDebugBreath)(JNIEnv*, jobject, jfloat level) { synth().setBreathOverride(level); }
+FN(void, nativeLoop)(JNIEnv*, jobject, jint op, jint layer, jfloat vol, jboolean flag) { synth().loop(op, layer, vol, flag); }
+FN(void, nativeLoopView)(JNIEnv* env, jobject, jfloatArray out) {
+    float v[Synth::kLoopCount];
+    synth().fillLoop(v);
+    env->SetFloatArrayRegion(out, 0, std::min<int>(Synth::kLoopCount, env->GetArrayLength(out)), v);
+}
 FN(jint, nativeModifiers)(JNIEnv* env, jobject, jfloatArray out) {
     float v[Synth::kModCount];
     synth().fillModifiers(v);
