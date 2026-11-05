@@ -106,7 +106,17 @@ FN(void, nativeResetLatencyTuner)(JNIEnv*, jobject) { synth().resetLatencyTuner(
 
 // The phone as a controller (see Synth.h).
 FN(void, nativeSetTilt)(JNIEnv*, jobject, jfloat degrees) { synth().setTilt(degrees); }
-FN(void, nativeSetTiltMode)(JNIEnv*, jobject, jint mode, jfloat amount) { synth().setTiltMode(mode, amount); }
+FN(void, nativeSetMotion)(JNIEnv*, jobject, jfloat twist, jfloat tip, jfloat turn, jfloat shake) {
+    synth().setMotion(twist, tip, turn, shake);
+}
+FN(void, nativeSetGyro)(JNIEnv* env, jobject, jintArray targets, jfloatArray amounts, jfloat bendSnap, jboolean bendReset) {
+    int t[4] = {}; float a[4] = {};
+    if (env->GetArrayLength(targets) >= 4 && env->GetArrayLength(amounts) >= 4) {
+        env->GetIntArrayRegion(targets, 0, 4, reinterpret_cast<jint*>(t));
+        env->GetFloatArrayRegion(amounts, 0, 4, a);
+    }
+    synth().setGyro(t, a, bendSnap, bendReset);
+}
 FN(jint, nativeSetBreath)(JNIEnv*, jobject, jint mode, jfloat sensitivity) { return synth().setBreath(mode, sensitivity); }
 FN(void, nativeDebugBreath)(JNIEnv*, jobject, jfloat level) { synth().setBreathOverride(level); }
 FN(jint, nativeModifiers)(JNIEnv* env, jobject, jfloatArray out) {

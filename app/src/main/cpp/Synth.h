@@ -49,10 +49,15 @@ public:
     void panic();
     void resetLatencyTuner() { tuneReset_ = true; }
 
-    // The phone as a controller. Tilt comes from the sensor thread (Motion.kt) at about 200 Hz;
-    // the audio callback hands the latest angle and breath to the engine.
-    void setTiltMode(int mode, float amount);
-    void setTilt(float degrees) { tiltDeg_.store(degrees, std::memory_order_relaxed); }
+    // The phone as a controller. The gyro's motion comes from the sensor thread (Motion.kt) at
+    // about 200 Hz; the audio callback hands the latest motion and breath to the engine.
+    // gyro: per source (twist, tip, turn, shake) a target (mpe::GyroTarget) and an amount.
+    void setGyro(const int target[4], const float amount[4], float bendSnap, bool bendReset);
+    void setMotion(float twist, float tip, float turn, float shake) {
+        motion_[0].store(twist, std::memory_order_relaxed); motion_[1].store(tip, std::memory_order_relaxed);
+        motion_[2].store(turn, std::memory_order_relaxed); motion_[3].store(shake, std::memory_order_relaxed);
+    }
+    void setTilt(float degrees) { motion_[0].store(degrees, std::memory_order_relaxed); }   // debug: the twist only
     // Starts or stops the microphone (blocks for its stream to open: not on the UI thread).
     // Returns the microphone state: 0 off, 1 listening, -1 could not open it.
     int setBreath(int mode, float sensitivity);
@@ -60,8 +65,9 @@ public:
     // Debug: a fixed breath level instead of the microphone's (< 0 = the microphone).
     void setBreathOverride(float level) { breathOverride_ = level; }
     // What the modifiers are doing, for the screen. Order fixed: see PhoneMods.kt.
-    static constexpr int kModCount = 12;
+    static constexpr int kModCount = 21;
     void fillModifiers(float out[kModCount]);
+    void applyGyro(mpe::Engine& e);
 
     // Everything the status line shows. Order is fixed: see Stats.kt.
     static constexpr int kStatCount = 21;
@@ -123,8 +129,13 @@ private:
 
     // the phone as a controller
     Mic mic_;
-    std::atomic<int> tiltMode_{0}, breathMode_{0};
-    std::atomic<float> tiltAmount_{0}, tiltDeg_{0}, breathOverride_{-1};
+    std::atomic<int> breathMode_{0};
+    std::atomic<float> breathOverride_{-1};
+    std::mutex gyroMu_;                             // the gyro settings, to hand to a new engine
+    int gyroTarget_[4] = {};
+    float gyroAmount_[4] = {}, bendSnap_ = 0;
+    bool bendReset_ = true;
+    std::atomic<float> motion_[4] = {};
 
     // settings
     std::atomic<int> instrument_[2] = {{0}, {-1}}, transpose_{0}, watchdogMs_{0};

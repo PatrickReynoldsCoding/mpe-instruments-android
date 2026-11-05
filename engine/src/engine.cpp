@@ -85,6 +85,7 @@ struct Engine::Voice {
     float volume = 1, volumeS = 1;
     bool wasGated = false;
     bool ringing = false;           // the finger lifted, the part has a release: still gated, fading
+    float relTime = 0;              // s, the release in effect when the finger lifted
     float relGain = 1;              // the release fade: 1 while held, down to 0 over the release
     float freq = 440, pitch = 0, pressureS = 0, slideS = 0.5f, level = 0;
     float pull = 0, prevPitch = 0, speed = 0;   // pitch assist
@@ -355,39 +356,92 @@ void Engine::updateModifiers(float dt) {
     bool held = false;
     for (int ch = 1; ch < kChannels; ch++) held = held || ch_[ch].note >= 0;
 
-    const TiltMode tm = TiltMode(tiltMode_.load(std::memory_order_relaxed));
-    const float amount = tiltAmount_.load(std::memory_order_relaxed);
-    const float ang = tiltDeg_.load(std::memory_order_relaxed);
-    if (!tiltStarted_ || tm != tiltNow_) { tiltZero_ = tiltPrev_ = ang; tiltHp1_ = tiltHp2_ = 0; tiltStarted_ = true; }
-    tiltNow_ = tm;
-    // The wobble: the angle through two high-pass stages at 2 Hz. A 5 Hz vibrato comes through
-    // (86%); a held slant gives 0, and so does a slow turn once it stops.
-    const float a = 1.f / (1.f + dt * 2.f * float(M_PI) * 2.f);
-    const float hp1 = tiltHp1_;
-    tiltHp1_ = a * (tiltHp1_ + ang - tiltPrev_);
-    tiltHp2_ = a * (tiltHp2_ + tiltHp1_ - hp1);
-    tiltPrev_ = ang;
-    // The zero: wherever the phone is while no finger is down. So the first note is always in tune.
-    if (!held) tiltZero_ = smoothTo(tiltZero_, ang, coef(0.1f));
-    const float rel = ang - tiltZero_;
-    float bend = 0, slide = 0, shown = 0;
-    switch (tm) {
-    case TiltMode::Vibrato:              // amount: cents at a 3.5 degree wobble; a tremor under 0.2 degrees is ignored
-        shown = tiltHp2_;
-        bend = clampf(deadZone(tiltHp2_, 0.2f) / 3.3f, -1.5f, 1.5f) * amount / 100.f;
-        break;
-    case TiltMode::Bend:                 // amount: semitones at 30 degrees; the first 2 degrees do nothing
-        shown = rel;
-        bend = clampf(deadZone(rel, 2.f) / 28.f, -1.f, 1.f) * amount;
-        break;
-    case TiltMode::Tone:                 // amount: slide change at 30 degrees
-        shown = rel;
-        slide = clampf(deadZone(rel, 1.5f) / 28.5f, -1.f, 1.f) * amount;
-        break;
-    default: break;
+    // Bend reset: a new note, or a held finger gliding onto another semitone. (With a little
+    // give, so a finger resting between two notes does not reset it over and over.)
+    bool newNote = false;
+    for (int ch = 1; ch < kChannels; ch++) {
+        const Channel& c = ch_[ch];
+        if (c.note < 0) { lastOn_[ch] = -1; continue; }
+        const float semi = c.note + c.bend;
+        if (c.noteOnCount != lastOn_[ch] || std::fabs(semi - lastSemi_[ch]) > 0.6f) {
+            newNote = true;
+            lastOn_[ch] = c.noteOnCount;
+            lastSemi_[ch] = std::round(semi);
+        }
     }
-    modBend_ = smoothTo(modBend_, bend, coef(0.005f));
+    const bool reset = newNote && bendReset_.load(std::memory_order_relaxed);
+
+    float bendTurns = 0, vib = 0, slide = 0, gain = 1, bright = 1, rel = 0, rev = 0, del = 0, shown[kGyroAxes] = {};
+    const float shake = clampf(motion_[3].load(std::memory_order_relaxed), 0.f, 1.f);
+    shakePhase_ = std::fmod(shakePhase_ + dt * 5.5f, 1.f);
+    for (int a = 0; a < kGyroAxes; a++) {
+        const GyroTarget t = GyroTarget(gyroTarget_[a].load(std::memory_order_relaxed));
+        const float amount = gyroAmount_[a].load(std::memory_order_relaxed);
+        float s = 0, wobble = 0;
+        if (a < 3) {
+            const float ang = motion_[a].load(std::memory_order_relaxed);
+            if (!gyroStarted_[a] || int(t) != gyroNow_[a]) {
+                gyroZero_[a] = gyroPrev_[a] = ang; gyroHp1_[a] = gyroHp2_[a] = 0; gyroStarted_[a] = true;
+            }
+            gyroNow_[a] = int(t);
+            // The wobble: the angle through two high-pass stages at 2 Hz. A 5 Hz vibrato comes
+            // through (86%); a held slant gives 0, and so does a slow turn once it stops.
+            const float k = 1.f / (1.f + dt * 2.f * float(M_PI) * 2.f);
+            const float hp1 = gyroHp1_[a];
+            gyroHp1_[a] = k * (gyroHp1_[a] + ang - gyroPrev_[a]);
+            gyroHp2_[a] = k * (gyroHp2_[a] + gyroHp1_[a] - hp1);
+            gyroPrev_[a] = ang;
+            wobble = gyroHp2_[a];
+            // The zero: wherever the phone is while no finger is down, so the first note is in
+            // tune; and, for a bend, again at every new note when the reset is on.
+            if (!held) gyroZero_[a] = smoothTo(gyroZero_[a], ang, coef(0.1f));
+            if (reset && t == GyroTarget::Bend) gyroZero_[a] = ang;
+            const float relDeg = ang - gyroZero_[a];
+            const float dz = t == GyroTarget::Bend ? 2.f : 1.5f;      // the first degrees do nothing
+            s = clampf(deadZone(relDeg, dz) / (30.f - dz), -1.f, 1.f);
+            if (t != GyroTarget::Off) shown[a] = t == GyroTarget::Vibrato ? wobble : relDeg;
+        } else {
+            s = shake;
+            if (t != GyroTarget::Off) shown[a] = shake;
+        }
+        const bool turn = a < 3;
+        switch (t) {
+        case GyroTarget::Bend: bendTurns += s * amount; break;
+        case GyroTarget::Vibrato:                                    // a turn: cents at a 3.5 degree wobble, a tremor under 0.2 ignored
+            vib += turn ? clampf(deadZone(wobble, 0.2f) / 3.3f, -1.5f, 1.5f) * amount / 100.f
+                        : s * amount / 100.f * std::sin(2.f * float(M_PI) * shakePhase_);
+            break;
+        case GyroTarget::Volume: gain *= turn ? 1.f + s * amount : 1.f - amount + amount * s; break;
+        case GyroTarget::Tone: slide += s * amount; break;
+        case GyroTarget::Brightness: bright *= turn ? clampf(1.f + s * amount, 0.05f, 1.f) : 1.f - amount + amount * s; break;
+        case GyroTarget::Release: rel += (turn ? std::max(s, 0.f) : s) * amount; break;
+        case GyroTarget::Reverb: rev += s * amount; break;
+        case GyroTarget::Delay: del += s * amount; break;
+        default: break;
+        }
+    }
+    // Snap the bend onto semitones: the middle of each semitone holds the note, and the move to
+    // the next is squeezed towards the edges (all of it, at full snap).
+    const float g = 1.f - clampf(bendSnap_.load(std::memory_order_relaxed), 0.f, 1.f);
+    if (g < 0.995f && bendTurns != 0.f) {
+        const float base = std::floor(bendTurns), t = bendTurns - base;
+        bendTurns = base + (g < 0.005f ? (t < 0.5f ? 0.f : 1.f) : clampf((t - (1.f - g) / 2.f) / g, 0.f, 1.f));
+    }
+    if (reset) modBend_ = vib;                                       // the reset is heard at once, with the new note
+    modBend_ = smoothTo(modBend_, bendTurns + vib, coef(0.005f));
     modSlide_ = smoothTo(modSlide_, slide, coef(0.02f));
+    gyroGain_ = smoothTo(gyroGain_, clampf(gain, 0.f, 2.f), coef(0.01f));
+    gyroBright_ = smoothTo(gyroBright_, clampf(bright, 0.05f, 1.f), coef(0.02f));
+    gyroRelease_ = std::max(0.f, rel);
+    gyroReverb_ = smoothTo(gyroReverb_, rev, coef(0.02f));
+    gyroDelay_ = smoothTo(gyroDelay_, del, coef(0.02f));
+    for (int a = 0; a < kGyroAxes; a++) pubAxis_[a].store(shown[a], std::memory_order_relaxed);
+    pubGain_.store(gyroGain_, std::memory_order_relaxed);
+    pubBright_.store(gyroBright_, std::memory_order_relaxed);
+    pubRelease_.store(gyroRelease_, std::memory_order_relaxed);
+    pubReverb_.store(gyroReverb_, std::memory_order_relaxed);
+    pubDelay_.store(gyroDelay_, std::memory_order_relaxed);
+    const float shownTilt = shown[0];
 
     breathNow_ = BreathMode(breathMode_.load(std::memory_order_relaxed));
     const float b = breathNow_ == BreathMode::Off ? 0.f : clampf(breathIn_.load(std::memory_order_relaxed), 0.f, 1.f);
@@ -395,7 +449,7 @@ void Engine::updateModifiers(float dt) {
     // Breath tone: the parts' low-pass, from dark (about 550 Hz) to the part's own brightness.
     toneOpen_ = breathNow_ == BreathMode::Tone ? 0.12f + 0.88f * breath_ : smoothTo(toneOpen_, 1.f, coef(0.02f));
 
-    pubTilt_.store(shown, std::memory_order_relaxed);
+    pubTilt_.store(shownTilt, std::memory_order_relaxed);
     pubBend_.store(modBend_, std::memory_order_relaxed);
     pubSlide_.store(modSlide_, std::memory_order_relaxed);
     pubBreath_.store(breathNow_ == BreathMode::Off ? 0.f : breath_, std::memory_order_relaxed);
@@ -409,6 +463,12 @@ ModView Engine::modifiers() const {
     m.slide = pubSlide_.load(std::memory_order_relaxed);
     m.breath = pubBreath_.load(std::memory_order_relaxed);
     m.held = pubHeld_.load(std::memory_order_relaxed);
+    for (int a = 0; a < kGyroAxes; a++) m.axis[a] = pubAxis_[a].load(std::memory_order_relaxed);
+    m.gain = pubGain_.load(std::memory_order_relaxed);
+    m.bright = pubBright_.load(std::memory_order_relaxed);
+    m.release = pubRelease_.load(std::memory_order_relaxed);
+    m.reverb = pubReverb_.load(std::memory_order_relaxed);
+    m.delay = pubDelay_.load(std::memory_order_relaxed);
     return m;
 }
 
@@ -442,8 +502,8 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
         }
         // Release: when the gate closes the note plays on as it was (the instrument stays gated) and
         // fades out over the part's release, then ends. It is cut off if the voice starts again.
-        const float release = perf_.part[p].release;
-        if (!v.gate && v.wasGated && release > 0.01f && v.sounding) v.ringing = true;
+        const float release = perf_.part[p].release + gyroRelease_;
+        if (!v.gate && v.wasGated && release > 0.01f && v.sounding) { v.ringing = true; v.relTime = release; }
         if (v.gate) v.ringing = false;
         v.wasGated = v.gate;
         v.releasedSamples = v.gate ? 0 : std::min(v.releasedSamples + n, 1 << 30);
@@ -515,7 +575,7 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
         // The release fade, as a gain squared (falls slowly at first, like a decaying sound).
         const float r0 = v.relGain;
         if (v.ringing) {
-            v.relGain = std::max(0.f, v.relGain - n / (std::max(release, 0.01f) * sr_));
+            v.relGain = std::max(0.f, v.relGain - n / (std::max(v.relTime, 0.01f) * sr_));
             if (v.relGain <= 0.f) v.ringing = false;            // faded out: the voice ends below
         }
         const float a0 = g0 * r0 * r0, a1 = v.volumeS * v.relGain * v.relGain;
@@ -553,7 +613,7 @@ void Engine::renderVoices(int p, float* mixL, float* mixR, int n, float dt) {
 // A part's tone (12 dB/octave low-pass, 300 Hz .. open) and drive.
 void Engine::partFx(int p, float* l, float* r, int n) {
     const PartConfig& c = perf_.part[p];
-    const float bright = std::min(c.brightness, 1.f) * toneOpen_;          // breath tone closes it further
+    const float bright = std::min(c.brightness, 1.f) * toneOpen_ * gyroBright_;   // breath tone and the gyro close it further
     float* st = fx_->tone[p];
     if (bright < 0.999f) {
         const float fc = 300.f * std::pow(2.f, std::max(0.f, bright) * 6.f);   // 300 Hz .. 19 kHz
@@ -603,7 +663,7 @@ void Engine::masterFx(float* mixL, float* mixR, const float* revL, const float* 
     }
 
     bool send = false;
-    for (int p = 0; p < 2; p++) send = send || perf_.part[p].reverb > 0;
+    for (int p = 0; p < 2; p++) send = send || perf_.part[p].reverb + gyroReverb_ > 0;
     if (!send && fx.reverbQuiet > 8 * sr_) return;                           // off, and its tail has died away
     if (fx.size) *fx.size = perf_.reverbSize;
     if (fx.damp) *fx.damp = perf_.reverbDamp;
@@ -756,14 +816,15 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
             partFx(p, partL, partR, n);
             // Breath swell: the part's loudness follows the breath (before the effects, so the
             // reverb and delay ring on when the breath stops). Smoothed per sample: no zipper.
-            const float gt = breathNow_ == BreathMode::Swell ? breath_ : 1.f;
-            if (gt < 0.9999f || gain_[p] < 0.9999f) {
+            // The gyro's volume comes in here too.
+            const float gt = (breathNow_ == BreathMode::Swell ? breath_ : 1.f) * gyroGain_;
+            if (std::fabs(gt - 1.f) > 1e-4f || std::fabs(gain_[p] - 1.f) > 1e-4f) {
                 const float k = 1.f - std::exp(-1.f / (0.003f * sr_));
                 float g = gain_[p];
                 for (int i = 0; i < n; i++) { g += (gt - g) * k; partL[i] *= g; partR[i] *= g; }
-                gain_[p] = gt >= 0.9999f && g > 0.9995f ? 1.f : g;
+                gain_[p] = std::fabs(gt - 1.f) < 1e-4f && std::fabs(g - 1.f) < 5e-4f ? 1.f : g;
             }
-            const float rs = perf_.part[p].reverb, ds = perf_.part[p].delay;
+            const float rs = clampf(perf_.part[p].reverb + gyroReverb_, 0.f, 1.f), ds = clampf(perf_.part[p].delay + gyroDelay_, 0.f, 1.f);
             for (int i = 0; i < n; i++) {
                 mixL[i] += partL[i]; mixR[i] += partR[i];
                 revL[i] += partL[i] * rs; revR[i] += partR[i] * rs;

@@ -252,6 +252,130 @@ static void tilt() {
     }
 }
 
+// ---- the gyro: tip, turn, shake, and what each can drive -------------------------------------------
+
+static void gyro() {
+    {
+        // Bend reset: a new note zeroes the bend, wherever the phone is turned.
+        Rig r("synths/lead");
+        r.engine.setGyro(GyroAxis::Twist, GyroTarget::Bend, 2);
+        r.run(0.2);
+        r.noteOn(1, 60, 100); r.press(1, 90);
+        r.run(0.1);
+        r.engine.setTilt(16);
+        r.run(0.1);
+        CHECK(std::fabs(firstVoice(r).pitch - 61) < 0.02f, "gyro bend: 16 degrees bends +1 (%.3f)", firstVoice(r).pitch);
+        r.noteOn(2, 64, 100); r.press(2, 90);              // another finger, still turned
+        r.run(0.05);
+        float lo = 99;
+        VoiceView v[32];
+        for (int i = 0, n = r.engine.voices(v, 32); i < n; i++) if (v[i].gate) lo = std::min(lo, v[i].pitch);
+        CHECK(std::fabs(lo - 60) < 0.02f, "gyro bend reset: a new note zeroes the bend (the held note is back at %.3f)", lo);
+        r.engine.setTilt(16 + 16);
+        r.run(0.1);
+        CHECK(std::fabs(firstVoice(r).pitch - 61) < 0.03f || std::fabs(firstVoice(r).pitch - 65) < 0.03f,
+              "gyro bend reset: turning on from there bends again (%.3f)", firstVoice(r).pitch);
+    }
+    {
+        // A finger gliding onto another semitone resets it too; with the reset off, it carries on.
+        for (bool resetOn : {true, false}) {
+            Rig r("synths/lead");
+            r.engine.setBendReset(resetOn);
+            r.engine.setGyro(GyroAxis::Twist, GyroTarget::Bend, 2);
+            r.run(0.2);
+            r.noteOn(1, 60, 100); r.press(1, 90);
+            r.run(0.1);
+            r.engine.setTilt(16);
+            r.run(0.1);
+            r.bend(1, 8192 + 8192 * 2 / 48);                  // the finger glides to D (+2)
+            r.run(0.1);
+            const float p = firstVoice(r).pitch;
+            if (resetOn) CHECK(std::fabs(p - 62) < 0.03f, "gyro bend reset: gliding onto another note zeroes the bend (%.3f)", p);
+            else CHECK(std::fabs(p - 63) < 0.03f, "gyro bend reset off: the bend stays on the new note (%.3f)", p);
+        }
+    }
+    {
+        // Snap: a bend held between semitones sits on one at full snap, glides at none.
+        auto at = [](float snap, float deg) {
+            Rig r("synths/lead");
+            r.engine.setBendSnap(snap);
+            r.engine.setGyro(GyroAxis::Tip, GyroTarget::Bend, 2);
+            r.run(0.2);
+            r.noteOn(1, 60, 100); r.press(1, 90);
+            r.run(0.1);
+            r.engine.setMotion(0, deg, 0, 0);
+            r.run(0.2);
+            return firstVoice(r).pitch;
+        };
+        // 2 degree dead zone, then 28 degrees per 2 semitones: 2 + 0.3 * 14 = 6.2 degrees is +0.3.
+        CHECK(std::fabs(at(0, 6.2f) - 60.3f) < 0.02f, "gyro bend snap 0: +0.3 semitone stays +0.3 (%.3f)", at(0, 6.2f));
+        CHECK(std::fabs(at(1, 6.2f) - 60) < 0.01f, "gyro bend snap 100%%: +0.3 snaps back to the note (%.3f)", at(1, 6.2f));
+        CHECK(std::fabs(at(1, 2 + 0.7f * 14) - 61) < 0.01f, "gyro bend snap 100%%: +0.7 snaps up a semitone (%.3f)", at(1, 2 + 0.7f * 14));
+        // 50%: the middle half of each semitone holds the note, the rest glides to the next.
+        CHECK(std::fabs(at(0.5f, 2 + 0.2f * 14) - 60) < 0.01f, "gyro bend snap 50%%: +0.2 holds the note (%.3f)", at(0.5f, 2 + 0.2f * 14));
+        CHECK(std::fabs(at(0.5f, 2 + 0.6f * 14) - 60.7f) < 0.02f, "gyro bend snap 50%%: +0.6 is on its way to the next (%.3f)", at(0.5f, 2 + 0.6f * 14));
+    }
+    {
+        // Tip to volume: tipped back is quieter, forward louder; the pitch is left alone.
+        auto level = [](float tip) {
+            Rig r("synths/lead");
+            r.engine.setGyro(GyroAxis::Tip, GyroTarget::Volume, 0.8f);
+            r.run(0.2);
+            r.noteOn(1, 60, 100); r.press(1, 90);
+            r.run(0.1);
+            r.engine.setMotion(0, tip, 0, 0);
+            auto x = r.run(0.4);
+            return std::make_pair(rms(x, kSr / 5, x.size()), firstVoice(r).pitch);
+        };
+        auto mid = level(0), back = level(-30), fwd = level(30);
+        CHECK(back.first < 0.35 * mid.first && fwd.first > 1.3 * mid.first,
+              "gyro tip volume: back quieter, forward louder (%.3f %.3f %.3f)", back.first, mid.first, fwd.first);
+        CHECK(back.second == 60.f && fwd.second == 60.f, "gyro tip volume: the pitch is untouched");
+    }
+    {
+        // Shake to volume: quieter at rest by the amount, full while shaking.
+        Rig r("synths/lead");
+        r.engine.setGyro(GyroAxis::Shake, GyroTarget::Volume, 1);
+        r.run(0.2);
+        r.noteOn(1, 60, 100); r.press(1, 90);
+        auto still = r.run(0.3);
+        r.engine.setMotion(0, 0, 0, 1);
+        auto shaking = r.run(0.3);
+        CHECK(rms(still, kSr / 10, still.size()) < 0.01 * rms(shaking, kSr / 10, shaking.size()) + 1e-6,
+              "gyro shake volume: silent at rest, sounds while shaking (%.4f %.4f)", rms(still, kSr / 10, still.size()), rms(shaking, kSr / 10, shaking.size()));
+    }
+    {
+        // Turn to release: turned right, a lifted note rings on.
+        auto tail = [](float turn) {
+            Rig r("synths/lead");
+            r.engine.setGyro(GyroAxis::Turn, GyroTarget::Release, 2);
+            r.run(0.2);
+            r.noteOn(1, 60, 100); r.press(1, 90);
+            r.run(0.1);
+            r.engine.setMotion(0, 0, turn, 0);
+            r.run(0.2);
+            r.noteOff(1, 60);
+            auto x = r.run(0.6);
+            return rms(x, size_t(0.4 * kSr), size_t(0.6 * kSr));
+        };
+        const double none = tail(0), lots = tail(30);
+        CHECK(none < 0.1 * lots && lots > 0.02, "gyro turn release: turned, a lifted note rings on (%.4f vs %.4f)", lots, none);
+    }
+    {
+        // Each source on its own: a tip does nothing to a twist's bend.
+        Rig r("synths/lead");
+        r.engine.setGyro(GyroAxis::Twist, GyroTarget::Bend, 2);
+        r.run(0.2);
+        r.noteOn(1, 60, 100); r.press(1, 90);
+        r.run(0.1);
+        r.engine.setMotion(0, 30, -30, 0.5f);
+        r.run(0.1);
+        CHECK(std::fabs(firstVoice(r).pitch - 60) < 0.01f, "gyro: tip, turn and shake leave the twist's bend alone (%.3f)", firstVoice(r).pitch);
+        ModView m = r.engine.modifiers();
+        CHECK(std::fabs(m.axis[0]) < 0.01f && m.axis[3] == 0.f, "gyro: sources with no target show nothing");
+    }
+}
+
 // ---- breath on the instruments -------------------------------------------------------------------
 
 static void breathOnInstruments() {
@@ -319,6 +443,7 @@ static void breathOnInstruments() {
 int main() {
     breathDetector();
     tilt();
+    gyro();
     breathOnInstruments();
     return finish();
 }

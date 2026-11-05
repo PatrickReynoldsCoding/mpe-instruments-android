@@ -191,11 +191,11 @@ private fun Rail(side: Int, split: Boolean, t: PadTheme, open: String?, pick: (S
             "Glide" to PadSettings.glideName(s.glide),
             "Vibrato" to PadSettings.VIBRATO[s.vibrato],
             // Experimental: on the rail once turned on in Setup (or while its panel is open here).
-            "Tilt" to PhoneMods.TILT[AppState.mods.tilt],
+            "Gyro" to gyroSummary(AppState.mods),
             "Breath" to PhoneMods.BREATH[AppState.mods.breath],
             "Look" to if (Eink) "E-ink" else PAD_THEMES[AppState.pad.theme].name,
         ).filter { (label, _) -> when (label) {
-            "Tilt" -> AppState.mods.tilt != 0 || open == "Tilt"
+            "Gyro" -> AppState.mods.gyroOn || open == "Gyro"
             "Breath" -> AppState.mods.breath != 0 || open == "Breath"
             else -> true
         } }
@@ -210,6 +210,16 @@ private fun Rail(side: Int, split: Boolean, t: PadTheme, open: String?, pick: (S
         RailItem(if (locked) "Locked" else "Lock", if (locked) "Strip plays" else "Strip moves", locked, t, accent) {
             AppState.updatePad(0) { it.copy(locked = !it.locked) }
         }
+    }
+}
+
+/** A word or two for the rail: what the gyro's sources do ("Off", "Twist: Bend", "2 on"). */
+private fun gyroSummary(m: PhoneMods): String {
+    val on = m.gyro.withIndex().filter { it.value.target != 0 }
+    return when (on.size) {
+        0 -> "Off"
+        1 -> "${PhoneMods.SOURCES[on[0].index]}: ${com.patrickreynolds.mpeinstruments.GyroSettings.TARGETS[on[0].value.target]}"
+        else -> "${on.size} on"
     }
 }
 
@@ -261,7 +271,7 @@ private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, 
             border = if (t.flat) BorderStroke(Edge, Color.Black) else null) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val shared = which in listOf("Look", "Tilt", "Breath")
+                val shared = which in listOf("Look", "Gyro", "Breath")
                 Text(if (split && !shared) "$which · ${if (side == 0) "left" else "right"}" else which,
                      fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 TextButton(onClick = close) { Text("Done") }
@@ -336,9 +346,9 @@ private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, 
                     Text("Lines", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                     Chips(PadSettings.LINES, p0.lines) { k -> AppState.updatePad(0) { it.copy(lines = k) } }
                 }
-                "Tilt", "Breath" -> Column(Modifier.verticalScroll(rememberScrollState())) {
+                "Gyro", "Breath" -> Column(Modifier.verticalScroll(rememberScrollState())) {
                     val r = liveModReading()
-                    if (which == "Tilt") TiltControls(r) else BreathControls(r)
+                    if (which == "Gyro") GyroControls(r) else BreathControls(r)
                 }
                 "Glide" -> {
                     LabeledSlider("Glide", s.glide, 0f..1f, PadSettings.glideName(s.glide), accent = accent, steps = 19) { v ->
@@ -595,7 +605,7 @@ private class Pad {
 
     fun tick(dt: Float) {
         modsOn = AppState.mods
-        val r = if (modsOn.tilt != 0 || modsOn.breath != 0) ModReading.read() else ModReading()
+        val r = if (modsOn.gyroOn || modsOn.breath != 0) ModReading.read() else ModReading()
         if (r.coarse() != mod.coarse()) dirty = true          // e-ink: redraw when it changed enough to see
         mod = r
         for (f in fingers.values) {
@@ -771,7 +781,7 @@ private class Pad {
 
     /** Tilt and breath along the top of the pad while one is on: what each is doing now. */
     private fun drawHud(d: androidx.compose.ui.graphics.drawscope.DrawScope, playH: Float) = with(d) {
-        val items = listOf(modsOn.tilt != 0, modsOn.breath != 0).count { it }
+        val items = listOf(modsOn.gyroOn, modsOn.breath != 0).count { it }
         if (items == 0) return@with
         val t = theme
         val iw = 176.dp.toPx(); val ih = 52.dp.toPx(); val gap = 10.dp.toPx(); val top = 8.dp.toPx(); val rr = 14.dp.toPx()
@@ -788,11 +798,15 @@ private class Pad {
             text.textSize = sizeDp.dp.toPx(); text.isFakeBoldText = bold; text.alpha = (alpha * 255).toInt()
             canvas.drawText(s, x, y, text)
         }
-        if (modsOn.tilt != 0) {
+        if (modsOn.gyroOn) {
             box()
-            // A little phone turned as the phone is (the needle's full swing is the full effect), and the effect.
+            // A little phone turned as the phone is, by the first source in use (the full swing is the
+            // full effect); a shake shakes it. Then the effect.
             val c = Offset(x0 + 32.dp.toPx(), top + ih / 2)
-            val a = (mod.tilt / tiltSpan(modsOn.tilt)).coerceIn(-1f, 1f) * 60f
+            val src = modsOn.gyro.indexOfFirst { it.target != 0 }.coerceAtLeast(0)
+            val v = mod.axis.getOrElse(src) { 0f }
+            val a = if (src == 3) v * 25f * kotlin.math.sin(System.nanoTime() / 2.5e7).toFloat()
+                    else (v / gyroSpan(src, modsOn.source(src).target)).coerceIn(-1f, 1f) * 60f
             val col = if (t.flat) Color.Black else if (mod.held) t.parts[0] else ink.copy(alpha = 0.55f)
             val half = 20.dp.toPx()
             drawLine(ink.copy(alpha = if (t.flat) 0.4f else 0.25f), Offset(c.x - half - 4f, c.y), Offset(c.x + half + 4f, c.y), strokeWidth = 2f)
@@ -802,8 +816,9 @@ private class Pad {
                               style = Stroke(width = 3.dp.toPx()))
             }
             val tx = x0 + 64.dp.toPx()
-            label(PhoneMods.TILT[modsOn.tilt].uppercase(), tx, top + 19.dp.toPx(), 11f, true, 0.7f)
-            label(if (mod.held || t.flat) tiltEffect(modsOn.tilt, mod) else "turn to play", tx, top + 39.dp.toPx(), 15f, mod.held,
+            label("GYRO · " + gyroSummary(modsOn).uppercase(), tx, top + 19.dp.toPx(), 11f, true, 0.7f)
+            val effect = gyroEffect(modsOn, mod)
+            label(if (mod.held || t.flat) effect.ifEmpty { "move to play" } else "move to play", tx, top + 39.dp.toPx(), 13f, mod.held,
                   if (mod.held) 1f else 0.6f)
             x0 += iw + gap
         }

@@ -35,15 +35,17 @@ object Native {
     external fun nativeStats(): DoubleArray
 
     // The phone as a controller (PhoneMods.kt).
-    /** The phone's twist in degrees, clockwise positive; from the sensor thread. */
+    /** Debug: the phone's twist in degrees, clockwise positive (the other sources left alone). */
     external fun nativeSetTilt(degrees: Float)
-    /** mode: 0 off, 1 vibrato, 2 bend, 3 tone; amount in the mode's unit (cents, semitones, slide). */
-    external fun nativeSetTiltMode(mode: Int, amount: Float)
+    /** From the sensor thread: twist, tip, turn in degrees (unwrapped), shake 0..1. See Motion. */
+    external fun nativeSetMotion(twist: Float, tip: Float, turn: Float, shake: Float)
+    /** Per source (twist, tip, turn, shake) a target (GyroSettings.TARGETS index) and amount in its unit. */
+    external fun nativeSetGyro(targets: IntArray, amounts: FloatArray, bendSnap: Float, bendReset: Boolean)
     /** mode: 0 off, 1 swell, 2 tone. Opens or closes the microphone, so not on the UI thread. Returns 0 off, 1 listening, -1 failed. */
     external fun nativeSetBreath(mode: Int, sensitivity: Float): Int
     /** Debug: a fixed breath level in place of the microphone's; < 0 = the microphone again. */
     external fun nativeDebugBreath(level: Float)
-    /** What tilt and breath are doing, 12 floats: see ModReading. */
+    /** What the gyro and breath are doing, 21 floats: see ModReading. */
     external fun nativeModifiers(out: FloatArray): Int
 
     // Debug: record the audio output (used by the emulator tests).

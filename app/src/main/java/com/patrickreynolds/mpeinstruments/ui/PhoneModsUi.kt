@@ -34,6 +34,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.AppState
+import com.patrickreynolds.mpeinstruments.GyroSettings
+import com.patrickreynolds.mpeinstruments.GyroSource
 import com.patrickreynolds.mpeinstruments.ModReading
 import com.patrickreynolds.mpeinstruments.Motion
 import com.patrickreynolds.mpeinstruments.PhoneControl
@@ -46,33 +48,41 @@ import kotlin.math.sin
 
 // ---- what the screen shows of tilt and breath --------------------------------------------------
 
-/** How far the gauge's needle goes for this mode: vibrato is a few degrees, a bend tens. */
-fun tiltSpan(mode: Int) = if (mode == 1) 6f else 36f
-/** The angle under which a turn does nothing (as in Engine::updateModifiers). */
-fun tiltDeadZone(mode: Int) = when (mode) { 1 -> 0.2f; 2 -> 2f; 3 -> 1.5f; else -> 0f }
+/** How far a source's meter goes: a vibrato is a few degrees, other turns tens, a shake 0..1. */
+fun gyroSpan(source: Int, target: Int) = when { source == 3 -> 1f; target == GyroSettings.VIBRATO -> 6f; else -> 36f }
 
-/** The effect in words: "+1.0 semitone", "-22 cents", "tone +25%". */
-fun tiltEffect(mode: Int, r: ModReading) = when (mode) {
-    1 -> "%+d cents".format((r.bend * 100).roundToInt())
-    2 -> "%+.1f semitone%s".format(r.bend, if (abs(r.bend) >= 1.05f) "s" else "")
-    3 -> "tone %+d%%".format((r.slide * 100).roundToInt())
-    else -> ""
+/** What the gyro is doing, in words: "+1.0 semitone · volume 80%". */
+fun gyroEffect(m: PhoneMods, r: ModReading): String {
+    val targets = m.gyro.map { it.target }.filter { it != 0 }.distinct()
+    return targets.mapNotNull { t -> when (t) {
+        GyroSettings.BEND -> "%+.1f semitone%s".format(r.bend, if (abs(r.bend) >= 1.05f) "s" else "")
+        GyroSettings.VIBRATO -> if (GyroSettings.BEND in targets) null else "%+d cents".format((r.bend * 100).roundToInt())
+        GyroSettings.VOLUME -> "volume ${(r.gain * 100).roundToInt()}%"
+        GyroSettings.TONE -> "tone %+d%%".format((r.slide * 100).roundToInt())
+        GyroSettings.BRIGHTNESS -> "brightness ${(r.bright * 100).roundToInt()}%"
+        GyroSettings.RELEASE -> "release +%.1f s".format(r.release)
+        GyroSettings.REVERB -> "reverb %+d%%".format((r.reverb * 100).roundToInt())
+        GyroSettings.DELAY -> "delay %+d%%".format((r.delay * 100).roundToInt())
+        else -> null
+    } }.joinToString(" · ")
 }
 
 /** The same reading in coarse steps: on e-ink the screen only redraws when one of these changes. */
 fun ModReading.coarse() = copy(
-    tilt = (tilt / 2).roundToInt() * 2f, bend = (bend * 10).roundToInt() / 10f, slide = (slide * 10).roundToInt() / 10f,
+    tilt = (tilt / 2).roundToInt() * 2f, axis = axis.map { (it / 2).roundToInt() * 2f }, gain = (gain * 10).roundToInt() / 10f,
+    bright = (bright * 10).roundToInt() / 10f, release = (release * 10).roundToInt() / 10f,
+    reverb = (reverb * 10).roundToInt() / 10f, delay = (delay * 10).roundToInt() / 10f, bend = (bend * 10).roundToInt() / 10f, slide = (slide * 10).roundToInt() / 10f,
     breath = (breath * 10).roundToInt() / 10f, micDb = (micDb / 5).roundToInt() * 5f, floorDb = (floorDb / 5).roundToInt() * 5f,
     onDb = (onDb / 5).roundToInt() * 5f, fullDb = (fullDb / 5).roundToInt() * 5f, micLevel = (micLevel * 10).roundToInt() / 10f,
     echoDb = (echoDb / 5).roundToInt() * 5f)
 
-/** What tilt and breath are doing, read every frame while one is on (in coarse steps on e-ink). */
+/** What the gyro and breath are doing, read every frame while one is on (in coarse steps on e-ink). */
 @Composable
 fun liveModReading(): ModReading {
     var r by remember { mutableStateOf(ModReading()) }
     LaunchedEffect(Unit) {
         while (true) {
-            if (AppState.mods.tilt == 0 && AppState.mods.breath == 0) delay(250)    // nothing moves: no need to draw
+            if (!AppState.mods.gyroOn && AppState.mods.breath == 0) delay(250)    // nothing moves: no need to draw
             else withFrameNanos { }
             val now = ModReading.read()
             r = if (Eink) now.coarse() else now
@@ -82,55 +92,47 @@ fun liveModReading(): ModReading {
 }
 
 /**
- * The tilt gauge: a little phone that turns as the phone does, on an arc whose ends are the
- * full effect. The shaded wedge in the middle is the dead zone. Dim while no finger is down:
- * then the zero is still following the phone.
+ * One gyro source's meter. A turn: a needle from the middle, the full effect at the ends and the
+ * dead zone shaded; dim while no finger is down (then the zero still follows the phone). A shake:
+ * a bar filling from the left.
  */
 @Composable
-fun TiltGauge(r: ModReading, mode: Int, modifier: Modifier = Modifier) {
+fun GyroMeter(r: ModReading, source: Int, target: Int, modifier: Modifier = Modifier) {
     val accent = PartColors[0]
+    val v = r.axis.getOrElse(source) { 0f }
     Column(modifier.fillMaxWidth()) {
-        Canvas(Modifier.fillMaxWidth().height(92.dp)) { tiltDial(r, mode, accent, if (Eink) Color.Black else TextDim, Eink) }
+        Canvas(Modifier.fillMaxWidth().height(30.dp)) { gyroBar(v, source, target, r.held || source == 3, accent, Eink) }
         Row(Modifier.fillMaxWidth()) {
-            Text(if (r.held) "Zero set: turn to play" else "Zero follows the phone until you play",
-                 color = TextDim, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            Text(tiltEffect(mode, r), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (r.held) accent else TextDim)
+            Text(when {
+                source == 3 -> "Shake the phone"
+                r.held -> "Zero set: move the phone to play"
+                else -> "The zero follows the phone until you play"
+            }, color = TextDim, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Text(if (source == 3) "${(v * 100).roundToInt()}%" else v.roundToInt().let { if (it == 0) "0°" else "%+d°".format(it) }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                 color = if (r.held || source == 3) accent else TextDim)
         }
     }
 }
 
-private fun DrawScope.tiltDial(r: ModReading, mode: Int, accent: Color, dim: Color, flat: Boolean) {
-    val c = Offset(size.width / 2, size.height * 0.96f)
-    val rad = minOf(size.width * 0.45f, size.height * 0.9f)
-    val span = tiltSpan(mode)
-    val sweep = 70f                                            // degrees of arc each side
-    fun vis(deg: Float) = (deg / span).coerceIn(-1f, 1f) * sweep
-    fun at(a: Float, k: Float) = Offset(c.x + rad * k * sin(Math.toRadians(a.toDouble())).toFloat(),
-                                        c.y - rad * k * cos(Math.toRadians(a.toDouble())).toFloat())
-    val track = if (flat) Color.Black else dim.copy(alpha = 0.5f)
-    // The arc, its ends (the full effect) and the dead zone.
-    drawArc(track, startAngle = -90f - sweep, sweepAngle = 2 * sweep, useCenter = false,
-            topLeft = Offset(c.x - rad, c.y - rad), size = Size(2 * rad, 2 * rad), style = Stroke(width = if (flat) 4f else 3f))
-    val dz = vis(tiltDeadZone(mode))
-    drawArc(if (flat) Color(0xFFAAAAAA) else dim.copy(alpha = 0.25f), startAngle = -90f - dz, sweepAngle = 2 * dz, useCenter = true,
-            topLeft = Offset(c.x - rad, c.y - rad), size = Size(2 * rad, 2 * rad))
-    val full = if (mode == 1) 3.5f else 30f
-    for (s in listOf(-1f, 1f)) drawLine(track, at(vis(s * full), 0.88f), at(vis(s * full), 1.08f), strokeWidth = 4f)
-    drawLine(track, at(0f, 0.9f), at(0f, 1.1f), strokeWidth = 2f)
-    // The needle and the little phone, turned by the reading.
-    val a = vis(r.tilt)
-    val col = if (flat) Color.Black else if (r.held) accent else dim
-    drawLine(col, c, at(a, 1f), strokeWidth = if (flat) 5f else 4f, cap = StrokeCap.Round)
-    val pw = rad * 0.5f
-    val ph = pw * 0.48f
-    val pc = at(a, 0.42f)
-    rotate(a, pivot = pc) {
-        drawRoundRect(if (flat) Color.White else Color.Black.copy(alpha = 0.35f), topLeft = Offset(pc.x - pw / 2, pc.y - ph / 2),
-                      size = Size(pw, ph), cornerRadius = CornerRadius(ph * 0.25f))
-        drawRoundRect(col, topLeft = Offset(pc.x - pw / 2, pc.y - ph / 2), size = Size(pw, ph),
-                      cornerRadius = CornerRadius(ph * 0.25f), style = Stroke(width = if (flat) 5f else 3f))
+private fun DrawScope.gyroBar(v: Float, source: Int, target: Int, live: Boolean, accent: Color, flat: Boolean) {
+    val h = size.height; val w = size.width
+    val track = if (flat) Color.White else Line
+    drawRoundRect(track, topLeft = Offset(0f, h * 0.3f), size = Size(w, h * 0.4f), cornerRadius = CornerRadius(h * 0.2f))
+    if (flat) drawRoundRect(Color.Black, topLeft = Offset(0f, h * 0.3f), size = Size(w, h * 0.4f), cornerRadius = CornerRadius(h * 0.2f),
+                            style = Stroke(width = 3f))
+    val col = if (flat) Color.Black else if (live) accent else TextDim
+    if (source == 3) {
+        drawRoundRect(col, topLeft = Offset(0f, h * 0.3f), size = Size(w * v.coerceIn(0f, 1f), h * 0.4f), cornerRadius = CornerRadius(h * 0.2f))
+        return
     }
-    drawCircle(col, radius = 6f, center = c)
+    val span = gyroSpan(source, target)
+    fun x(deg: Float) = w / 2 + (deg / span).coerceIn(-1f, 1f) * w / 2
+    val dz = if (target == GyroSettings.VIBRATO) 0.2f else if (target == GyroSettings.BEND) 2f else 1.5f
+    drawRect(if (flat) Color(0xFFAAAAAA) else TextDim.copy(alpha = 0.3f), Offset(x(-dz), h * 0.3f), Size(x(dz) - x(-dz), h * 0.4f))
+    val full = if (target == GyroSettings.VIBRATO) 3.5f else 30f
+    for (s in listOf(-1f, 1f)) drawLine(if (flat) Color.Black else TextDim, Offset(x(s * full), h * 0.1f), Offset(x(s * full), h * 0.9f), strokeWidth = 3f)
+    drawLine(col, Offset(w / 2, h / 2), Offset(x(v), h / 2), strokeWidth = h * 0.4f)
+    drawCircle(col, radius = h * 0.32f, center = Offset(x(v), h / 2))
 }
 
 /**
@@ -181,30 +183,66 @@ private fun DrawScope.breathBar(r: ModReading, accent: Color, flat: Boolean) {
 
 // ---- the settings ----------------------------------------------------------------------------
 
+/** What each source does, in words. */
+private val SOURCE_HELP = listOf(
+    "Turn the phone like a steering wheel. Clockwise is up (or more).",
+    "Tip the top edge away from you for up (or more), towards you for down.",
+    "Turn the right edge away from you for up (or more), the left edge for down.",
+    "Shake the phone: the harder, the more. Volume and brightness are lowered at rest and come back as you shake.",
+)
+private val TARGET_HELP = mapOf(
+    GyroSettings.BEND to "Bends every note. Each note starts in tune, wherever the phone is.",
+    GyroSettings.VIBRATO to "A quick wobble adds vibrato; holding the phone at a slant does nothing, so it stays in tune.",
+    GyroSettings.VOLUME to "Louder one way, quieter the other.",
+    GyroSettings.TONE to "Each instrument's own tone control, like sliding a finger up or down a Seaboard key.",
+    GyroSettings.BRIGHTNESS to "Darker the other way: a filter closes over the sound.",
+    GyroSettings.RELEASE to "Notes ring on after you lift your finger, longer the further you move it.",
+    GyroSettings.REVERB to "More of the sound goes into the reverb.",
+    GyroSettings.DELAY to "More of the sound goes into the delay.",
+)
+
+/** The gyro: pick a source (twist, tip, turn, shake), then what it does and how much. */
 @Composable
-fun TiltControls(r: ModReading) {
+fun GyroControls(r: ModReading) {
     val m = AppState.mods
-    Chips(PhoneMods.TILT, m.tilt) { k -> AppState.updateMods { it.copy(tilt = k) } }
-    Text(when (m.tilt) {
-        1 -> "Wobble the phone for vibrato. Holding it at a slant does nothing, so it stays in tune."
-        2 -> "Turn clockwise to bend up, anticlockwise to bend down. Each note starts in tune, wherever the phone is."
-        3 -> "Turn to change each instrument's tone: the same as sliding a finger up or down a Seaboard key."
-        else -> "Turn the phone like a steering wheel to add vibrato, bend the notes or change the tone."
-    }, color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-    when (m.tilt) {
-        1 -> LabeledSlider("Depth at a firm wobble", m.vibratoCents, 10f..100f, "${m.vibratoCents.roundToInt()} cents") { v ->
-            AppState.updateMods { it.copy(vibratoCents = v) } }
-        2 -> {
-            Text("Bend at a 30° turn", fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-            val i = PhoneMods.BEND_RANGES.indexOfFirst { abs(it - m.bendSemis) < 0.01f }
-            Chips(PhoneMods.BEND_RANGES.map { "±${it.roundToInt()}" }, i) { k ->
-                AppState.updateMods { it.copy(bendSemis = PhoneMods.BEND_RANGES[k]) } }
+    var src by remember { mutableIntStateOf(m.gyro.indexOfFirst { it.target != 0 }.coerceAtLeast(0)) }
+    val g = m.source(src)
+    Segmented(PhoneMods.SOURCES.mapIndexed { k, n -> if (m.source(k).target != 0) "$n •" else n }, src) { src = it }
+    Text(SOURCE_HELP[src], color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    Text("Controls", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+    Chips(GyroSettings.TARGETS, g.target) { t ->
+        AppState.updateMods { it.withSource(src) { GyroSource(t, GyroSettings.defaultAmount(t)) } } }
+    if (g.target != 0) {
+        TARGET_HELP[g.target]?.let { Text(it, color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
+        val full = if (src == 3) "at a hard shake" else if (g.target == GyroSettings.VIBRATO) "at a firm wobble" else "at a 30° turn"
+        if (g.target == GyroSettings.BEND) {
+            Text("Bend $full", fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+            val i = GyroSettings.BEND_RANGES.indexOfFirst { abs(it - g.amount) < 0.01f }
+            Chips(GyroSettings.BEND_RANGES.map { "±${it.roundToInt()}" }, i) { k ->
+                AppState.updateMods { it.withSource(src) { s -> s.copy(amount = GyroSettings.BEND_RANGES[k]) } } }
+        } else {
+            val range = GyroSettings.range(g.target)
+            LabeledSlider("Amount $full", g.amount, range, GyroSettings.amountName(g.target, g.amount)) { v ->
+                AppState.updateMods { it.withSource(src) { s -> s.copy(amount = v) } } }
         }
-        3 -> LabeledSlider("Change at a 30° turn", m.toneRange, 0.1f..1f, pct(m.toneRange)) { v -> AppState.updateMods { it.copy(toneRange = v) } }
+        if (Motion.available == false) Text("This phone has no gyroscope, so the gyro cannot work here.", color = Warn, fontSize = 13.sp)
+        else GyroMeter(r, src, g.target, Modifier.padding(top = 6.dp))
     }
-    if (m.tilt != 0) {
-        if (Motion.available == false) Text("This phone has no gyroscope, so tilt cannot work here.", color = Warn, fontSize = 13.sp)
-        else TiltGauge(r, m.tilt, Modifier.padding(top = 6.dp))
+    // Bends, whichever source makes them.
+    if (m.gyro.any { it.target == GyroSettings.BEND }) {
+        HorizontalDivider(color = Line, modifier = Modifier.padding(vertical = 10.dp))
+        Text("Bends", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        LabeledSlider("Snap to semitones", m.bendSnap, 0f..1f,
+                      when { m.bendSnap < 0.01f -> "off"; m.bendSnap > 0.99f -> "at once"; else -> pct(m.bendSnap) }) { v ->
+            AppState.updateMods { it.copy(bendSnap = v) } }
+        Text(when {
+            m.bendSnap < 0.01f -> "The bend follows the phone smoothly."
+            m.bendSnap > 0.99f -> "The bend jumps from semitone to semitone, with nothing in between."
+            else -> "The bend holds each semitone for a while, then moves on to the next. More snap holds it longer."
+        }, color = TextDim, fontSize = 12.sp)
+        SwitchRow("A new note resets the bend", m.bendReset,
+                  "When you play another note, or a finger slides onto one, the bend starts again from where the phone is") { v ->
+            AppState.updateMods { it.copy(bendReset = v) } }
     }
 }
 
@@ -249,7 +287,7 @@ fun BreathControls(r: ModReading) {
 }
 
 /**
- * Setup tab, Experimental: tilt and breath, with what they are doing. New, and tried on an
+ * Setup tab, Experimental: the gyro and breath, with what they are doing. New, and tried on an
  * emulator but not yet on many phones. Once one is on, it is also on the touch pad's rail.
  */
 @Composable
@@ -259,9 +297,9 @@ fun ExperimentalCard() {
         Text("New and still being tuned: try them and see how they feel. They work on every instrument, from the touch pad " +
              "or a controller. Once one is on, it also appears on the touch pad's side rail.", color = TextDim, fontSize = 12.sp)
         Spacer(Modifier.height(12.dp))
-        Text("Tilt (the gyro)", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text("Gyro (the phone's motion)", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))
-        TiltControls(r)
+        GyroControls(r)
         HorizontalDivider(color = Line, modifier = Modifier.padding(vertical = 12.dp))
         Text("Breath (the microphone)", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))

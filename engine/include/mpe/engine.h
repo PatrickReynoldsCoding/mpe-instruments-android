@@ -87,7 +87,23 @@ struct FingerView {
 //   Vibrato: only the quick wobble of the phone bends the pitch; holding it at a slant does not.
 //   Bend:    tilting bends the pitch, from the angle the phone was at when the first finger went down.
 //   Tone:    tilting moves slide (each instrument's own tone control) up or down.
-enum class TiltMode : int { Off = 0, Vibrato = 1, Bend = 2, Tone = 3 };
+enum class TiltMode : int { Off = 0, Vibrato = 1, Bend = 2, Tone = 3 };   // the twist only (see setTiltMode)
+
+// The gyro: four sources from the phone's motion, each driving one target.
+//   Twist: turned like a steering wheel (about the axis out of the screen), clockwise positive.
+//   Tip:   the top edge tipped away from you, positive (about the screen's left-right axis).
+//   Turn:  the right edge turned away from you, positive (about the screen's up-down axis).
+//   Shake: how hard the phone is being shaken, 0..1.
+// The turns are in degrees from where the phone was when the notes started: the zero follows
+// the phone while no finger is down. A turn's full effect is at 30 degrees, a shake's at 1.
+enum class GyroAxis : int { Twist = 0, Tip = 1, Turn = 2, Shake = 3 };
+constexpr int kGyroAxes = 4;
+// What a source does, and its amount's unit (at the full turn or shake):
+//   Bend semitones · Vibrato cents (a turn: at a firm 3.5 degree wobble; a shake: a 5.5 Hz
+//   vibrato as deep as the shake) · Volume, Tone, Brightness, Reverb, Delay 0..1 · Release seconds.
+//   Volume and Brightness from a turn go both ways from the zero (tip back: quieter, darker);
+//   from a shake they are lowered by the amount at rest and come back as you shake.
+enum class GyroTarget : int { Off = 0, Bend, Vibrato, Volume, Tone, Brightness, Release, Reverb, Delay };
 //   Swell:   breath is the loudness: no breath, no sound. It also replaces the fingers' pressure,
 //            so instruments that respond to pressure (bow, voice, reed, filter) respond to it.
 //   Tone:    notes play as usual; breath opens a filter, dark when not blowing (a wah).
@@ -95,7 +111,10 @@ enum class BreathMode : int { Off = 0, Swell = 1, Tone = 2 };
 
 // What the modifiers are doing now, for the screen.
 struct ModView {
-    float tilt = 0;        // degrees the effect sees: the wobble (Vibrato) or the angle from the zero (Bend, Tone)
+    float tilt = 0;        // degrees the twist's effect sees: the wobble (Vibrato) or the angle from the zero
+    float axis[kGyroAxes] = {};   // what each source's effect sees: degrees (or the wobble) and the shake 0..1
+    float gain = 1, bright = 1;   // the gyro's volume and brightness, as multipliers
+    float release = 0, reverb = 0, delay = 0;   // added by the gyro: seconds, sends
     float bend = 0;        // semitones added to every held note
     float slide = 0;       // added to every note's slide (-1..1)
     float breath = 0;      // 0..1, as applied
@@ -143,10 +162,24 @@ public:
     void panic() { panicFlag_ = true; }
     // Tilt. amount is in the mode's own unit: Vibrato cents at a firm (3.5 degree) wobble, Bend
     // semitones at a 30 degree tilt, Tone the change in slide (0..1) at 30 degrees.
-    void setTiltMode(TiltMode m, float amount) { tiltAmount_ = amount; tiltMode_ = int(m); }
+    // (The twist only, as before the gyro had more sources: the other sources are left alone.)
+    void setTiltMode(TiltMode m, float amount) {
+        setGyro(GyroAxis::Twist, m == TiltMode::Vibrato ? GyroTarget::Vibrato : m == TiltMode::Bend ? GyroTarget::Bend
+                                 : m == TiltMode::Tone ? GyroTarget::Tone : GyroTarget::Off, amount);
+    }
     // Any thread (the sensor's): the phone's twist about the screen's axis, in degrees, positive
     // = clockwise as you look at the screen. Unwrapped: it may run past 360.
-    void setTilt(float degrees) { tiltDeg_ = degrees; }
+    void setTilt(float degrees) { motion_[0] = degrees; }
+    // The gyro: what each source does, and how much (see GyroTarget for the units).
+    void setGyro(GyroAxis a, GyroTarget t, float amount) { gyroAmount_[int(a)] = amount; gyroTarget_[int(a)] = int(t); }
+    // Bends from the gyro pulled onto semitones: 0 not at all .. 1 straight onto the nearest.
+    void setBendSnap(float k) { bendSnap_ = k; }
+    // A new note, or a finger gliding onto another semitone, zeroes the gyro's bend.
+    void setBendReset(bool on) { bendReset_ = on; }
+    // Any thread (the sensor's): twist, tip and turn in degrees (unwrapped), and the shake 0..1.
+    void setMotion(float twist, float tip, float turn, float shake) {
+        motion_[0] = twist; motion_[1] = tip; motion_[2] = turn; motion_[3] = shake;
+    }
     void setBreathMode(BreathMode m) { breathMode_ = int(m); }
     // Any thread (the microphone's): 0..1, see mpe::Breath.
     void setBreath(float level) { breathIn_ = level; }
@@ -203,15 +236,21 @@ private:
     int64_t lastEventFrame_ = 0, frameCounter_ = 0;
 
     // phone modifiers: settings and inputs from other threads ...
-    std::atomic<int> tiltMode_{0}, breathMode_{0};
-    std::atomic<float> tiltAmount_{0}, tiltDeg_{0}, breathIn_{0};
+    std::atomic<int> breathMode_{0};
+    std::atomic<int> gyroTarget_[kGyroAxes] = {};
+    std::atomic<float> gyroAmount_[kGyroAxes] = {}, motion_[kGyroAxes] = {}, bendSnap_{0}, breathIn_{0};
+    std::atomic<bool> bendReset_{true};
     // ... and the audio thread's state (see updateModifiers)
-    bool tiltStarted_ = false;
-    float tiltZero_ = 0, tiltHp1_ = 0, tiltHp2_ = 0, tiltPrev_ = 0;   // degrees
+    bool gyroStarted_[3] = {};
+    int gyroNow_[3] = {};
+    float gyroZero_[3] = {}, gyroHp1_[3] = {}, gyroHp2_[3] = {}, gyroPrev_[3] = {};   // degrees
+    float shakePhase_ = 0;
+    int lastOn_[16] = {}; float lastSemi_[16] = {};  // per finger: the note and semitone the bend reset last saw
     float modBend_ = 0, modSlide_ = 0, breath_ = 0, gain_[2] = {1, 1}, toneOpen_ = 1;
-    TiltMode tiltNow_ = TiltMode::Off;
+    float gyroGain_ = 1, gyroBright_ = 1, gyroRelease_ = 0, gyroReverb_ = 0, gyroDelay_ = 0;
     BreathMode breathNow_ = BreathMode::Off;
     std::atomic<float> pubTilt_{0}, pubBend_{0}, pubSlide_{0}, pubBreath_{0};
+    std::atomic<float> pubAxis_[kGyroAxes] = {}, pubGain_{1}, pubBright_{1}, pubRelease_{0}, pubReverb_{0}, pubDelay_{0};
     std::atomic<bool> pubHeld_{false};
     float lowZ_[4] = {}, lowB_[5] = {}, lowEnv_ = 0, lowRel_ = 0;   // the output's low end, for the breath detector
     std::atomic<float> lowDb_{-120.f};

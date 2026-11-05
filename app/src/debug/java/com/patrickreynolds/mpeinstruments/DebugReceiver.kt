@@ -69,17 +69,23 @@ class DebugReceiver : BroadcastReceiver() {
                 if (intent.getBooleanExtra("gyro", false)) Motion.debugAngle = null
                 if (intent.hasExtra("level")) Native.nativeDebugBreath(intent.getFloatExtra("level", -1f))
                 AppState.updateMods { m ->
-                    val tilt = intent.getIntExtra("tilt", m.tilt).coerceIn(0, 3)
-                    var n = m.copy(tilt = tilt, breath = intent.getIntExtra("breath", m.breath).coerceIn(0, 2),
+                    var n = m.copy(breath = intent.getIntExtra("breath", m.breath).coerceIn(0, 2),
                                    sensitivity = intent.getFloatExtra("sensitivity", m.sensitivity))
-                    if (intent.hasExtra("amount")) {
-                        val a = intent.getFloatExtra("amount", 0f)
-                        n = when (tilt) { 1 -> n.copy(vibratoCents = a); 2 -> n.copy(bendSemis = a); 3 -> n.copy(toneRange = a); else -> n }
+                    // --ei tilt N: the twist, as before the gyro (0 off, 1 vibrato, 2 bend, 3 tone).
+                    // --ei source S --ei target T: any source (0 twist, 1 tip, 2 turn, 3 shake) and target.
+                    val src = if (intent.hasExtra("tilt")) 0 else intent.getIntExtra("source", -1)
+                    if (src in 0..3) {
+                        val t = if (intent.hasExtra("tilt")) when (intent.getIntExtra("tilt", 0)) {
+                            1 -> GyroSettings.VIBRATO; 2 -> GyroSettings.BEND; 3 -> GyroSettings.TONE; else -> 0 }
+                            else intent.getIntExtra("target", 0).coerceIn(GyroSettings.TARGETS.indices)
+                        val a = intent.getFloatExtra("amount", GyroSettings.defaultAmount(t))
+                        n = n.withSource(src) { GyroSource(t, GyroSettings.clampAmount(t, a)) }
                     }
+                    if (intent.hasExtra("snap")) n = n.copy(bendSnap = intent.getFloatExtra("snap", 0f))
                     n
                 }
-                // Tilt only runs while the app is on screen; from adb it may not be.
-                if (intent.hasExtra("tilt")) Motion.forceOn(context, AppState.mods.tilt != 0)
+                // The gyro only runs while the app is on screen; from adb it may not be.
+                if (intent.hasExtra("tilt") || intent.hasExtra("source")) Motion.forceOn(context, AppState.mods.gyroOn)
                 logMods()
             }
             "MODS" -> logMods()

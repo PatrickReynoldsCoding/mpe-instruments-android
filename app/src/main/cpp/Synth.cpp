@@ -90,7 +90,7 @@ bool Synth::open() {
     eng->setTranspose(transpose_);
     eng->setBendRange(bendRange_);
     eng->setWatchdogMs(watchdogMs_);
-    eng->setTiltMode(mpe::TiltMode(tiltMode_.load()), tiltAmount_);
+    applyGyro(*eng);
     eng->setBreathMode(mpe::BreathMode(breathMode_.load()));
     eng->setInstrument(0, instrument_[0]);
     if (instrument_[1] >= 0) eng->setInstrument(1, instrument_[1]);
@@ -187,7 +187,8 @@ oboe::DataCallbackResult Synth::onAudioReady(oboe::AudioStream* stream, void* da
     pollMidi(now);
     // The latest tilt and breath. The engine smooths both. A microphone that could not be
     // opened turns breath off rather than leaving Swell silent.
-    audioEngine_->setTilt(tiltDeg_.load(std::memory_order_relaxed));
+    audioEngine_->setMotion(motion_[0].load(std::memory_order_relaxed), motion_[1].load(std::memory_order_relaxed),
+                            motion_[2].load(std::memory_order_relaxed), motion_[3].load(std::memory_order_relaxed));
     const float ob = breathOverride_.load(std::memory_order_relaxed);
     const bool micDown = ob < 0 && mic_.state() != 1;
     audioEngine_->setBreathMode(mpe::BreathMode(micDown ? 0 : breathMode_.load(std::memory_order_relaxed)));
@@ -320,10 +321,21 @@ void Synth::setBendRange(float s) { bendRange_ = s; if (auto e = engine()) e->se
 void Synth::setWatchdogMs(int ms) { watchdogMs_ = ms; if (auto e = engine()) e->setWatchdogMs(ms); }
 void Synth::panic() { if (auto e = engine()) e->panic(); }
 
-void Synth::setTiltMode(int mode, float amount) {
-    tiltAmount_ = amount;
-    tiltMode_ = std::min(std::max(mode, 0), 3);
-    if (auto e = engine()) e->setTiltMode(mpe::TiltMode(tiltMode_.load()), amount);
+void Synth::setGyro(const int target[4], const float amount[4], float bendSnap, bool bendReset) {
+    {
+        std::lock_guard<std::mutex> g(gyroMu_);
+        for (int a = 0; a < 4; a++) { gyroTarget_[a] = std::min(std::max(target[a], 0), 8); gyroAmount_[a] = amount[a]; }
+        bendSnap_ = bendSnap;
+        bendReset_ = bendReset;
+    }
+    if (auto e = engine()) applyGyro(*e);
+}
+
+void Synth::applyGyro(mpe::Engine& e) {
+    std::lock_guard<std::mutex> g(gyroMu_);
+    for (int a = 0; a < 4; a++) e.setGyro(mpe::GyroAxis(a), mpe::GyroTarget(gyroTarget_[a]), gyroAmount_[a]);
+    e.setBendSnap(bendSnap_);
+    e.setBendReset(bendReset_);
 }
 
 int Synth::setBreath(int mode, float sensitivity) {
@@ -345,6 +357,11 @@ void Synth::fillModifiers(float o[kModCount]) {
     const mpe::Breath::Meter mm = mic_.meter();
     o[5] = mm.db; o[6] = mm.floorDb; o[7] = mm.onDb; o[8] = mm.fullDb; o[9] = mm.level; o[10] = mm.echoDb;
     o[11] = float(breathOverride_.load() >= 0 ? 2 : mic_.state());     // 2 = debug override
+    if (auto e = engine()) {
+        const mpe::ModView m = e->modifiers();
+        for (int a = 0; a < 4; a++) o[12 + a] = m.axis[a];
+        o[16] = m.gain; o[17] = m.bright; o[18] = m.release; o[19] = m.reverb; o[20] = m.delay;
+    }
 }
 
 // Order must match Stats.kt.

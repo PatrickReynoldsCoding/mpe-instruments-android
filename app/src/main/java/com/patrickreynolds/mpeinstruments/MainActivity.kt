@@ -161,11 +161,11 @@ class MainActivity : ComponentActivity() {
         }
         if (padOpen) {
             BackHandler { showPad(false) }
-            // Tilt on: keep the pad the way up it is, or a firm turn would flip the screen mid-note.
+            // Gyro on: keep the pad the way up it is, or a firm turn would flip the screen mid-note.
             val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
                 android.content.res.Configuration.ORIENTATION_LANDSCAPE
-            LaunchedEffect(AppState.mods.tilt != 0, landscape) {
-                requestedOrientation = if (AppState.mods.tilt != 0 && landscape) ActivityInfo.SCREEN_ORIENTATION_LOCKED
+            LaunchedEffect(AppState.mods.gyroOn, landscape) {
+                requestedOrientation = if (AppState.mods.gyroOn && landscape) ActivityInfo.SCREEN_ORIENTATION_LOCKED
                                        else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             }
             PadScreen { showPad(false) }
