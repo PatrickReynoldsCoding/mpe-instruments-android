@@ -188,46 +188,16 @@ fun InstrumentRow(part: Int, label: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PresetSheet(onClose: () -> Unit) {
-    var naming by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
     ModalBottomSheet(onDismissRequest = onClose, containerColor = Panel) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Presets", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                OutlinedButton(onClick = { naming = true }) { Text("Save current") }
-            }
-            if (naming) {
-                Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true,
-                        label = { Text("Name") }, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { AppState.saveAs(name); naming = false; name = "" }) { Text("Save") }
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            LazyColumn {
-                val list = AppState.allPresets
-                for ((i, p) in list.withIndex()) item {
-                    if (i == AppState.allPresets.count { it.builtIn } && i > 0) {
-                        HorizontalDivider(color = Line)
-                        Text("YOURS", color = TextDim, fontSize = 12.sp, letterSpacing = 1.2.sp, modifier = Modifier.padding(vertical = 8.dp))
-                    }
-                    Row(Modifier.fillMaxWidth().clickable { AppState.load(p); onClose() }.padding(vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        val current = p.name == AppState.presetName
-                        Column(Modifier.weight(1f)) {
-                            Text(p.name, fontSize = 17.sp, color = if (current) PartColors[0] else Color.Unspecified,
-                                 fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal)
-                            Text(presetSummary(p.perf), color = TextDim, fontSize = 12.sp, maxLines = 1)
-                        }
-                        if (!p.builtIn) TextButton(onClick = { AppState.delete(p) }) { Text("Delete", color = TextDim) }
-                    }
-                }
-            }
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp).verticalScroll(rememberScrollState())) {
+            Text("Presets", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            PresetLibrary(PartColors[0], onLoaded = onClose)
         }
     }
 }
 
-private fun presetSummary(p: com.patrickreynolds.mpeinstruments.Perf): String {
+internal fun presetSummary(p: com.patrickreynolds.mpeinstruments.Perf): String {
     fun name(id: String) = AppState.instruments.firstOrNull { it.id == id }?.name ?: id
     val a = p.part(0); val b = p.part(1)
     fun desc(x: com.patrickreynolds.mpeinstruments.Part) = name(x.instrument) + if (x.arp) " arp" else ""

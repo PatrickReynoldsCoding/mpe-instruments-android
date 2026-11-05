@@ -88,5 +88,36 @@ int main() {
         r.noteOff(1, 60);
         L.collect();
     }
+    {
+        // Independent loops: a 1-beat loop and a 3-beat loop, each its own length; the second
+        // records only what is played, not the first loop.
+        Rig r("synths/lead");
+        Performance p; p.bpm = 120;
+        r.engine.setPerformance(p);
+        Looper& A = r.engine.looper(0);
+        Looper& B = r.engine.looper(1);
+        A.press(); r.run(0.02);
+        r.noteOn(1, 60, 100); r.press(1, 90); r.run(0.3); r.noteOff(1, 60); r.run(0.2);
+        A.press(); r.run(0.02);
+        CHECK(A.view().length == kSr / 2, "loops: the first is one beat (%d frames)", A.view().length);
+        B.press(); r.run(0.3);
+        CHECK(B.view().state == LoopState::Armed, "loops: a second loop arms while the first plays (the first's notes do not start it)");
+        r.noteOn(2, 67, 100); r.press(2, 90); r.run(0.6); r.noteOff(2, 67); r.run(0.9);
+        B.press(); r.run(0.02);
+        CHECK(B.view().length == 3 * kSr / 2, "loops: the second has its own length, three beats (%d frames)", B.view().length);
+        CHECK(A.view().state == LoopState::Playing && B.view().state == LoopState::Playing, "loops: both play");
+        // Mute the first: what is left is the second alone, so it must not hold the first's note.
+        A.setMuted(true);
+        r.run(0.05);
+        auto x = r.run(3.0);
+        double lead = rms(x, 0, x.size());
+        A.clear(); r.run(0.05);
+        auto y = r.run(3.0);
+        CHECK(lead > 0.02 && std::fabs(rms(y, 0, y.size()) - lead) < 0.05 * lead,
+              "loops: muting or clearing the first leaves the second as it was (%.4f vs %.4f)", lead, rms(y, 0, y.size()));
+        CHECK(B.view().state == LoopState::Playing && A.view().state == LoopState::Empty, "loops: clearing one leaves the other");
+        B.clear(); r.run(0.02);
+        A.collect(); B.collect();
+    }
     return finish();
 }

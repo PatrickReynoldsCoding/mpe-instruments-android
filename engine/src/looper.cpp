@@ -48,6 +48,7 @@ void Looper::press() {
 void Looper::undo() { cmds_.push({Undo}); }
 void Looper::clear() { cmds_.push({Clear}); }
 void Looper::setPaused(bool p) { cmds_.push({p ? Pause : Resume}); }
+void Looper::setMuted(bool m) { cmds_.push({m ? Mute : Unmute}); }
 void Looper::setLayer(int i, float volume, bool muted) { Cmd c{SetLayer}; c.layer = i; c.vol = volume; c.mute = muted; cmds_.push(c); }
 
 LoopView Looper::view() const {
@@ -57,6 +58,7 @@ LoopView Looper::view() const {
     v.pos = pubPos_.load(std::memory_order_relaxed);
     v.layers = pubCount_.load(std::memory_order_relaxed);
     v.paused = pubPaused_.load(std::memory_order_relaxed);
+    v.muted = pubMuted_.load(std::memory_order_relaxed);
     for (int i = 0; i < kMaxLayers; i++) v.level[i] = pubLevel_[i].load(std::memory_order_relaxed);
     return v;
 }
@@ -105,7 +107,7 @@ void Looper::endOverdub() {
     state_ = LoopState::Playing;
 }
 
-void Looper::process(float* l, float* r, int n, bool noteStarted, float bpm) {
+void Looper::process(const float* l, const float* r, float* outL, float* outR, int n, bool noteStarted, float bpm) {
     Cmd c;
     while (cmds_.pop(c)) {
         switch (c.op) {
@@ -137,8 +139,10 @@ void Looper::process(float* l, float* r, int n, bool noteStarted, float bpm) {
             break;
         case Clear:
             for (Layer& L : layers_) { retire(L.buf); L = Layer(); }
-            count_ = 0; state_ = LoopState::Empty; length_ = pos_ = rec_ = 0; paused_ = false;
+            count_ = 0; state_ = LoopState::Empty; length_ = pos_ = rec_ = 0; paused_ = false; muted_ = false;
             break;
+        case Mute: muted_ = true; break;
+        case Unmute: muted_ = false; break;
         case Pause: if (state_ == LoopState::Playing) paused_ = true; break;
         case Resume: paused_ = false; break;
         case SetLayer:
@@ -171,9 +175,13 @@ void Looper::process(float* l, float* r, int n, bool noteStarted, float bpm) {
                 const float g = rec_ < fade_ ? float(rec_) / fade_ : rec_ >= length_ - fade_ ? float(length_ - 1 - rec_) / fade_ : 1.f;
                 D.buf[2 * pos_] = toS16(inL * g); D.buf[2 * pos_ + 1] = toS16(inR * g);
                 recPeak_ = std::max(recPeak_, std::max(std::fabs(inL), std::fabs(inR)));
-                if (++rec_ >= length_) { pos_ = (pos_ + 1) % length_; endOverdub(); l[i] += ol; r[i] += orr; continue; }
+                if (++rec_ >= length_) {
+                    pos_ = (pos_ + 1) % length_; endOverdub();
+                    if (!muted_) { outL[i] += ol; outR[i] += orr; }
+                    continue;
+                }
             }
-            l[i] += ol; r[i] += orr;
+            if (!muted_) { outL[i] += ol; outR[i] += orr; }
             pos_ = (pos_ + 1) % length_;
         }
     }
@@ -183,6 +191,7 @@ void Looper::process(float* l, float* r, int n, bool noteStarted, float bpm) {
     pubPos_.store(state_ == LoopState::Recording ? rec_ : pos_, std::memory_order_relaxed);
     pubCount_.store(count_, std::memory_order_relaxed);
     pubPaused_.store(paused_, std::memory_order_relaxed);
+    pubMuted_.store(muted_, std::memory_order_relaxed);
     for (int i = 0; i < kMaxLayers; i++) pubLevel_[i].store(i < count_ ? layers_[i].peak : 0.f, std::memory_order_relaxed);
 }
 

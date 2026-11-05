@@ -68,12 +68,12 @@ public:
     static constexpr int kModCount = 21;
     void fillModifiers(float out[kModCount]);
     void applyGyro(mpe::Engine& e);
-    // The looper (see mpe/looper.h). op: 0 press, 1 undo, 2 clear, 3 pause (flag), 4 a layer's
-    // volume and mute (layer, vol, flag), 5 snap to beats (flag). The loop lives in the engine:
-    // if the audio stream has to be reopened, it is lost.
-    void loop(int op, int layer, float vol, bool flag);
-    static constexpr int kLoopCount = 14;            // state, length, pos, layers, paused, rate, level[8]
-    void fillLoop(float out[kLoopCount]);
+    // The loops (see mpe/looper.h), loop 0..3. op: 0 press, 1 undo, 2 clear, 3 pause (flag), 4 a
+    // layer's volume and mute (layer, vol, flag), 5 snap to beats (flag; every loop), 6 mute (flag).
+    // The loops live in the engine: if the audio stream has to be reopened, they are lost.
+    void loop(int track, int op, int layer, float vol, bool flag);
+    static constexpr int kLoopCount = 15;            // state, length, pos, layers, paused, rate, level[8], muted
+    void fillLoop(int track, float out[kLoopCount]);
 
     // Everything the status line shows. Order is fixed: see Stats.kt.
     static constexpr int kStatCount = 21;

@@ -132,8 +132,9 @@ struct Engine::Fx {
 };
 
 Engine::Engine(int sampleRate)
-    : sr_(sampleRate), ch_(new Channel[kChannels]), parts_(new Part[2]), fx_(new Fx(sampleRate)), looper_(new Looper(sampleRate)),
+    : sr_(sampleRate), ch_(new Channel[kChannels]), parts_(new Part[2]), fx_(new Fx(sampleRate)),
       pubVoices_(new PubVoice[2 * kChannels]), pubFingers_(new PubFinger[kChannels]) {
+    for (auto& lp : loops_) lp.reset(new Looper(sampleRate));
     // A 150 Hz low-pass (2nd order), the same band the breath detector listens to.
     const float w0 = 2.f * float(M_PI) * 150.f / sr_, cw = std::cos(w0), al = std::sin(w0) / (2.f * 0.7071f), a0 = 1.f + al;
     lowB_[0] = (1.f - cw) / 2.f / a0; lowB_[1] = (1.f - cw) / a0; lowB_[2] = lowB_[0];
@@ -833,8 +834,11 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
             }
         }
         masterFx(mixL, mixR, revL, revR, delL, delR, n);
-        // The looper records this (everything played, with its effects) and adds the loop to it.
-        looper_->process(mixL, mixR, n, noteStarted_, perf_.bpm);
+        // The loops record this (everything played, with its effects) and add themselves to it.
+        float liveL[kMaxBlock], liveR[kMaxBlock];
+        std::copy(mixL, mixL + n, liveL);
+        std::copy(mixR, mixR + n, liveR);
+        for (auto& lp : loops_) lp->process(liveL, liveR, mixL, mixR, n, noteStarted_, perf_.bpm);
         noteStarted_ = false;
         for (int i = 0; i < n; i++) {                                // soft limiter
             const float l = std::tanh(mixL[i] * vol * 1.5f) * 0.7f, r = std::tanh(mixR[i] * vol * 1.5f) * 0.7f;

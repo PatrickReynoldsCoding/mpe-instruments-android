@@ -1,4 +1,5 @@
-// The looper: records what is played, then plays it round and round while more is played over it.
+// One loop: records what is played, then plays it round and round while more is played over it.
+// The engine has several (Engine::kLoops), each with its own length and layers.
 //
 //   press()  Empty: arm. Recording starts with the first note played (so the loop starts on the
 //            beat you play), up to kMaxSeconds.
@@ -9,10 +10,11 @@
 //   undo()   drop the last layer (the first loop too, which empties the looper).
 //   clear()  drop everything.
 //   setPaused(true) holds the loop where it is, silent; false carries on.
+//   setMuted(true) keeps it going round, silent (so it comes back in time).
 //   setLayer(i, volume, muted)
 //
 // What is recorded is the whole mix after the effects (so a layer keeps its reverb), and none of
-// the loop itself. Layers are kept as 16-bit audio. The audio thread never allocates: the control
+// any loop. Layers are kept as 16-bit audio. The audio thread never allocates: the control
 // thread makes each layer's buffer and hands it over, and takes it back to free.
 #pragma once
 #include <atomic>
@@ -28,7 +30,7 @@ struct LoopView {
     int length = 0;            // frames; 0 until the first loop is recorded
     int pos = 0;               // frames into the loop (while recording the first: frames recorded)
     int layers = 0;            // finished layers
-    bool paused = false;
+    bool paused = false, muted = false;
     float level[8] = {};       // each layer's loudness (peak), for the screen
 };
 
@@ -45,19 +47,20 @@ public:
     void undo();
     void clear();
     void setPaused(bool p);
+    void setMuted(bool m);
     void setLayer(int i, float volume, bool muted);
     void setSnap(bool beats) { snap_ = beats; }
     LoopView view() const;
     void collect();                           // frees layers the audio thread has let go of
 
     // ---- audio thread ----
-    // mix: the block as it will be heard, before the loop; the loop is added to it.
+    // inL/inR: what was played live in this block (recorded); outL/outR: the mix, the loop is added to it.
     // noteStarted: a note started in this block. bpm: for snapping the length to beats.
-    void process(float* l, float* r, int n, bool noteStarted, float bpm);
+    void process(const float* inL, const float* inR, float* outL, float* outR, int n, bool noteStarted, float bpm);
 
 private:
     struct Layer { int16_t* buf = nullptr; int frames = 0; float vol = 1; bool mute = false; float peak = 0; };
-    enum Op { Arm, Cancel, Stop, Overdub, Undo, Clear, Pause, Resume, SetLayer };
+    enum Op { Arm, Cancel, Stop, Overdub, Undo, Clear, Pause, Resume, SetLayer, Mute, Unmute };
     struct Cmd { Op op; int16_t* buf = nullptr; int frames = 0; int layer = 0; float vol = 1; bool mute = false; };
 
     void endFirst(float bpm);
@@ -75,13 +78,13 @@ private:
     Layer layers_[kMaxLayers];
     int count_ = 0;                            // finished layers
     LoopState state_ = LoopState::Empty;
-    bool paused_ = false;
+    bool paused_ = false, muted_ = false;
     int length_ = 0, pos_ = 0, rec_ = 0;       // rec_: frames recorded into the layer being made
     float recPeak_ = 0;
 
     // published for the screen and the control thread
     std::atomic<int> pubState_{0}, pubLength_{0}, pubPos_{0}, pubCount_{0};
-    std::atomic<bool> pubPaused_{false};
+    std::atomic<bool> pubPaused_{false}, pubMuted_{false};
     std::atomic<float> pubLevel_[kMaxLayers] = {};
 };
 

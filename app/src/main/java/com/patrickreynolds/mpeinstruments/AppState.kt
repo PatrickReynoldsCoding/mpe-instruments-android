@@ -11,7 +11,30 @@ import com.patrickreynolds.mpeinstruments.ui.palette
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false)
+/**
+ * A preset is a whole touch pad: its sounds and effects (the performance), and the pads' layout
+ * (notes, scale, glide, up/down, vibrato, split). How the pad looks and the lock stay as they are.
+ * Built-in presets have no layout of their own: loading one keeps the pads as they are.
+ */
+data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false, val pad: PadLayout? = null) {
+    fun json(): JSONObject = JSONObject().put("name", name).put("perf", perf.json()).apply { pad?.let { put("pad", it.json()) } }
+    companion object {
+        fun from(o: JSONObject) = Preset(o.getString("name"), Perf.from(o.getJSONObject("perf")),
+                                         pad = o.optJSONObject("pad")?.let { PadLayout.from(it) })
+    }
+}
+
+/** Both pads' settings and where a split divides them. */
+data class PadLayout(val pads: List<PadSettings>, val splitAt: Float) {
+    fun json(): JSONObject = JSONObject().put("left", pads[0].json()).put("right", pads[1].json()).put("splitAt", splitAt.toDouble())
+    companion object {
+        fun from(o: JSONObject): PadLayout {
+            val l = PadSettings.from(o.optJSONObject("left"))
+            return PadLayout(listOf(l, PadSettings.from(o.optJSONObject("right"), l)),
+                             o.optDouble("splitAt", 0.5).toFloat().coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN))
+        }
+    }
+}
 
 /**
  * What the screen shows and the engine plays. Every change goes to the engine at once and is
@@ -49,16 +72,16 @@ object AppState {
     /** Which pad of a split the rail is changing: 0 left, 1 right. */
     var padSide by mutableStateOf(0)
 
-    /** Sound slots: a whole part's sound each (instrument, effects, arp), one tap to switch to. */
-    var slots by mutableStateOf<List<Part?>>(DEFAULT_SLOTS)
+    /** The built-in preset on view was changed since it was loaded (a built-in is not changed itself). */
+    var presetEdited by mutableStateOf(false)
         private set
-    /** The looper's buttons on the touch pad, and whether a loop's length snaps to beats. */
+    /** The loop buttons on the touch pad, and whether a loop's length snaps to beats. */
     var loopDock by mutableStateOf(true)
         private set
     var loopSnap by mutableStateOf(true)
         private set
-    /** Each loop layer's volume and mute (the loop itself is not kept). */
-    var loopLayers by mutableStateOf(List(Looper.MAX_LAYERS) { 1f to false })
+    /** Each loop's layers' volume and mute (the loops themselves are not kept). */
+    var loopLayers by mutableStateOf(List(Looper.LOOPS) { List(Looper.MAX_LAYERS) { 1f to false } })
         private set
 
     /** Tilt and breath: the phone as a controller; not part of a preset. */
@@ -90,16 +113,13 @@ object AppState {
         pads = listOf(p0, p1)
         padSplitAt = prefs.getFloat("padSplitAt", 0.5f).coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN)
         mods = runCatching { PhoneMods.from(prefs.getString("mods", null)?.let { JSONObject(it) }) }.getOrDefault(PhoneMods())
-        slots = runCatching {
-            val a = JSONArray(prefs.getString("slots", null) ?: return@runCatching DEFAULT_SLOTS)
-            List(SLOT_COUNT) { k -> a.optJSONObject(k)?.let { Part.from(it) } }
-        }.getOrDefault(DEFAULT_SLOTS)
         loopDock = prefs.getBoolean("loopDock", true)
         loopSnap = prefs.getBoolean("loopSnap", true)
         userPresets = runCatching {
             val a = JSONArray(prefs.getString("presets", "[]"))
-            (0 until a.length()).map { a.getJSONObject(it).let { o -> Preset(o.getString("name"), Perf.from(o.getJSONObject("perf"))) } }
+            (0 until a.length()).map { Preset.from(a.getJSONObject(it)) }
         }.getOrDefault(emptyList())
+        if (!prefs.getBoolean("presetsStarted", false)) startPresets()
         applyAll()
     }
 
@@ -112,29 +132,6 @@ object AppState {
         Native.nativeSetPerformance(perf.toArray())
         PhoneControl.apply(appContext, mods)
         Looper.snap(loopSnap)
-    }
-
-    // ---- sound slots and the looper ----------------------------------------------------------
-
-    /** Play slot k's sound on part [side]. */
-    fun loadSlot(k: Int, side: Int) { slots.getOrNull(k)?.let { s -> updatePart(side) { s } } }
-    /** Keep part [side]'s sound in slot k (null empties it). */
-    fun saveSlot(k: Int, part: Part?) {
-        slots = slots.mapIndexed { i, s -> if (i == k) part else s }
-        val a = JSONArray()
-        for (s in slots) a.put(s?.json() ?: JSONObject.NULL)
-        prefs.edit().putString("slots", a.toString()).apply()
-    }
-    fun changeLoopDock(on: Boolean) { loopDock = on; prefs.edit().putBoolean("loopDock", on).apply() }
-    fun changeLoopSnap(on: Boolean) { loopSnap = on; Looper.snap(on); prefs.edit().putBoolean("loopSnap", on).apply() }
-    fun changeLoopLayer(i: Int, volume: Float, muted: Boolean) {
-        loopLayers = loopLayers.mapIndexed { k, l -> if (k == i) volume to muted else l }
-        Looper.layer(i, volume, muted)
-    }
-    /** After a clear or an undo the layers start again at full volume, unmuted. */
-    fun resetLoopLayers(from: Int = 0) {
-        loopLayers = loopLayers.mapIndexed { k, l -> if (k >= from) 1f to false else l }
-        for (k in from until Looper.MAX_LAYERS) Looper.layer(k, 1f, false)
     }
 
     private fun index(id: String) = instruments.indexOfFirst { it.id == id }.takeIf { it >= 0 }
@@ -158,7 +155,7 @@ object AppState {
         if (perf == old) return
         applyInstruments(old)
         Native.nativeSetPerformance(perf.toArray())
-        presetName = presetName.takeIf { matchesPreset(it) } ?: ""
+        touched()
         save()
     }
 
@@ -196,31 +193,128 @@ object AppState {
         if (now == pads[side]) return
         pads = pads.mapIndexed { k, p -> if (k == side) now else p }
         prefs.edit().putString(if (side == 0) "pad" else "pad2", now.json().toString()).apply()
+        touched()
     }
 
     fun changePadSplit(at: Float) {
         padSplitAt = at.coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN)
+        touched()
         saver.removeCallbacks(savePadSplit)
         saver.postDelayed(savePadSplit, 400)
     }
     private val savePadSplit = Runnable { prefs.edit().putFloat("padSplitAt", padSplitAt).apply() }
 
+    // ---- the loops ---------------------------------------------------------------------------
+
+    fun changeLoopDock(on: Boolean) { loopDock = on; prefs.edit().putBoolean("loopDock", on).apply() }
+    fun changeLoopSnap(on: Boolean) { loopSnap = on; Looper.snap(on); prefs.edit().putBoolean("loopSnap", on).apply() }
+    fun changeLoopLayer(t: Int, i: Int, volume: Float, muted: Boolean) {
+        loopLayers = loopLayers.mapIndexed { k, ls -> if (k == t) ls.mapIndexed { j, l -> if (j == i) volume to muted else l } else ls }
+        Looper.layer(t, i, volume, muted)
+    }
+    /** After a clear or an undo a loop's layers start again at full volume, unmuted. */
+    fun resetLoopLayers(t: Int, from: Int = 0) {
+        loopLayers = loopLayers.mapIndexed { k, ls -> if (k == t) ls.mapIndexed { j, l -> if (j >= from) 1f to false else l } else ls }
+        for (j in from until Looper.MAX_LAYERS) Looper.layer(t, j, 1f, false)
+    }
+
     // ---- presets ----------------------------------------------------------------------------
 
     val allPresets get() = BUILT_IN_PRESETS + userPresets
+    /** The preset on view, if it is one of yours: what you change is kept in it. */
+    val activePreset get() = userPresets.firstOrNull { it.name == presetName }
+    private var loading = false
 
-    private fun matchesPreset(name: String) = allPresets.firstOrNull { it.name == name }?.perf == perf
+    private fun currentLayout() = PadLayout(pads, padSplitAt)
+
+    /** Something changed: keep it in your preset on view, or note that a built-in one was changed. */
+    private fun touched() {
+        if (loading || presetName.isEmpty()) return
+        val p = activePreset
+        if (p == null) { presetEdited = true; return }
+        val now = p.copy(perf = perf, pad = currentLayout())
+        if (now == p) return
+        userPresets = userPresets.map { if (it.name == p.name) now else it }
+        saver.removeCallbacks(savePresetsNow)
+        saver.postDelayed(savePresetsNow, 400)
+    }
 
     fun load(p: Preset) {
+        loading = true
         update { p.perf }
+        p.pad?.let { l ->
+            // The layout comes from the preset; how the pad looks and the lock stay as they are.
+            val look = pads[0]
+            pads = listOf(l.pads[0].copy(theme = look.theme, lines = look.lines, locked = look.locked, hideRail = look.hideRail), l.pads[1])
+            prefs.edit().putString("pad", pads[0].json().toString()).putString("pad2", pads[1].json().toString()).apply()
+            padSplitAt = l.splitAt
+            prefs.edit().putFloat("padSplitAt", padSplitAt).apply()
+        }
+        loading = false
         presetName = p.name
+        presetEdited = false
         prefs.edit().putString("preset", presetName).apply()
+    }
+
+    /** A name not yet taken: "Cello", then "Cello 2", "Cello 3"... */
+    fun freeName(base: String, except: String? = null): String {
+        val b = base.trim().ifEmpty { "Preset" }
+        val taken = allPresets.map { it.name }.filter { it != except }.toSet()
+        if (b !in taken) return b
+        val stem = b.replace(Regex(" \\d+$"), "")
+        var n = 2
+        while ("$stem $n" in taken) n++
+        return "$stem $n"
+    }
+
+    /** What is playing now, as a name: the instrument, or both of a split or layer. */
+    fun soundName(p: Perf = perf): String {
+        fun n(i: Int) = instruments.firstOrNull { it.id == p.part(i).instrument }?.name ?: "Preset"
+        return if (p.layout == 0) n(0) else "${n(0)} + ${n(1)}"
+    }
+
+    /** Keep what is playing now as a new preset of yours (after the one on view), and switch to it. */
+    fun newPreset(name: String = soundName()): String {
+        val clean = freeName(name)
+        val fresh = Preset(clean, perf, pad = currentLayout())
+        val at = userPresets.indexOfFirst { it.name == presetName }
+        userPresets = if (at < 0) userPresets + fresh else userPresets.take(at + 1) + fresh + userPresets.drop(at + 1)
+        presetName = clean
+        presetEdited = false
+        savePresets()
+        return clean
     }
 
     fun saveAs(name: String) {
         val clean = name.trim().ifEmpty { return }
-        userPresets = userPresets.filter { it.name != clean } + Preset(clean, perf)
+        val fresh = Preset(clean, perf, pad = currentLayout())
+        userPresets = if (userPresets.any { it.name == clean }) userPresets.map { if (it.name == clean) fresh else it } else userPresets + fresh
         presetName = clean
+        presetEdited = false
+        savePresets()
+    }
+
+    fun rename(p: Preset, name: String) {
+        if (p.builtIn) return
+        val clean = freeName(name, except = p.name)
+        userPresets = userPresets.map { if (it.name == p.name) it.copy(name = clean) else it }
+        if (presetName == p.name) presetName = clean
+        savePresets()
+    }
+
+    fun duplicate(p: Preset) {
+        val copy = p.copy(name = freeName(p.name), builtIn = false, pad = p.pad ?: currentLayout())
+        val at = userPresets.indexOfFirst { it.name == p.name }
+        userPresets = if (at < 0) userPresets + copy else userPresets.take(at + 1) + copy + userPresets.drop(at + 1)
+        savePresets()
+    }
+
+    /** Move one of your presets one place earlier (-1) or later (+1). */
+    fun move(p: Preset, by: Int) {
+        val i = userPresets.indexOfFirst { it.name == p.name }
+        val j = i + by
+        if (i < 0 || j !in userPresets.indices) return
+        userPresets = userPresets.toMutableList().apply { add(j, removeAt(i)) }
         savePresets()
     }
 
@@ -231,9 +325,36 @@ object AppState {
         savePresets()
     }
 
+    /**
+     * Your first presets: a spread of sounds to loop together (and the touch pad's sound slots of
+     * 0.13, which become presets of their own).
+     */
+    private fun startPresets() {
+        val layout = currentLayout()
+        val fromSlots = runCatching {
+            val a = JSONArray(prefs.getString("slots", null) ?: return@runCatching null)
+            (0 until a.length()).mapNotNull { k -> a.optJSONObject(k)?.let { Part.from(it) } }
+        }.getOrNull()
+        val parts = fromSlots ?: STARTING_SOUNDS
+        val made = mutableListOf<Preset>()
+        for (part in parts) {
+            val p = Perf(parts = listOf(part, Part(instrument = "voices/soprano")))
+            val base = soundName(p)
+            val taken = (BUILT_IN_PRESETS + userPresets + made).map { it.name }.toSet()
+            var name = base; var n = 2
+            while (name in taken) name = "$base ${n++}"
+            val drums = instruments.firstOrNull { it.id == part.instrument }?.group == "drums"
+            made += Preset(name, p, pad = if (drums) PadLayout(layout.pads.map { it.copy(vertical = 2) }, layout.splitAt) else layout)
+        }
+        userPresets = userPresets + made
+        prefs.edit().putBoolean("presetsStarted", true).remove("slots").apply()
+        savePresets()
+    }
+
+    private val savePresetsNow = Runnable { savePresets() }
     private fun savePresets() {
         val a = JSONArray()
-        for (p in userPresets) a.put(JSONObject().put("name", p.name).put("perf", p.perf.json()))
+        for (p in userPresets) a.put(p.json())
         prefs.edit().putString("presets", a.toString()).putString("preset", presetName).apply()
     }
 
@@ -272,13 +393,11 @@ val BUILT_IN_PRESETS = listOf(
 /** The narrowest a pad of a split can be, as a fraction of the screen. */
 const val PAD_SPLIT_MIN = 0.2f
 
-const val SLOT_COUNT = 6
-/** The slots to begin with: a spread of sounds to loop together. */
-val DEFAULT_SLOTS: List<Part?> = listOf(
+/** Your first presets: a spread of sounds to loop together. */
+val STARTING_SOUNDS = listOf(
     Part(instrument = "drums/kit", reverb = 0.08f),
     Part(instrument = "plucked/nylon-guitar", reverb = 0.15f),
     Part(instrument = "strings/cello", reverb = 0.2f),
     Part(instrument = "synths/pad", reverb = 0.3f),
     Part(instrument = "synths/lead", reverb = 0.12f, delay = 0.15f),
-    null,
 )

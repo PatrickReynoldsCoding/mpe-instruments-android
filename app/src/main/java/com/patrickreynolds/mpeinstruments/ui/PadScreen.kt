@@ -134,7 +134,7 @@ fun PadScreen(onClose: () -> Unit) {
             frame.let { }                                     // redraw every frame
             pad.draw(this, STRIP.toPx())
         }
-        if (AppState.loopDock) LoopDock(side, theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
+        if (AppState.loopDock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
         }
       }
         if (railShown) panel?.let { SettingPanel(it, side, split, theme) { panel = null } }
@@ -191,6 +191,7 @@ private fun Rail(side: Int, split: Boolean, t: PadTheme, open: String?, pick: (S
         }
         if (split) SideToggle(side, t)
         val items = listOf(
+            "Presets" to AppState.presetName.ifEmpty { "None" },
             "Sound" to (AppState.instrument(side)?.name ?: ""),
             "Arp" to (if (part.arp) ARP_ORDERS[part.order.coerceIn(ARP_ORDERS.indices)] else "Off"),
             "Effects" to effectsSummary(part),
@@ -284,7 +285,7 @@ private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, 
             border = if (t.flat) BorderStroke(Edge, Color.Black) else null) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val shared = which in listOf("Look", "Gyro", "Breath", "Loop")
+                val shared = which in listOf("Look", "Gyro", "Breath", "Loop", "Presets")
                 Text(if (split && !shared) "$which · ${if (side == 0) "left" else "right"}" else which,
                      fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 TextButton(onClick = close) { Text("Done") }
@@ -319,6 +320,7 @@ private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, 
                     DelayControls()
                 }
                 "Loop" -> Column(Modifier.verticalScroll(rememberScrollState())) { LoopControls(accent) }
+                "Presets" -> Column(Modifier.verticalScroll(rememberScrollState())) { PresetLibrary(accent) }
                 "Release" -> {
                     ReleaseSlider(side, accent)
                     Text(if (AppState.perf.part(side).release < 0.01f) "A note ends the instrument's own way when you lift your finger."
@@ -362,10 +364,9 @@ private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, 
                     Text("Lines", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                     Chips(PadSettings.LINES, p0.lines) { k -> AppState.updatePad(0) { it.copy(lines = k) } }
                 }
-                "Gyro", "Breath" -> Column(Modifier.verticalScroll(rememberScrollState())) {
-                    val r = liveModReading()
-                    if (which == "Gyro") GyroControls(r) else BreathControls(r)
-                }
+                // The gyro's tabs and meter stay at the top; the rest scrolls under them.
+                "Gyro" -> Column { GyroPanel(liveModReading(), scroll = true) }
+                "Breath" -> Column(Modifier.verticalScroll(rememberScrollState())) { BreathControls(liveModReading()) }
                 "Glide" -> {
                     LabeledSlider("Glide", s.glide, 0f..1f, PadSettings.glideName(s.glide), accent = accent, steps = 19) { v ->
                         set { it.copy(glide = v) } }

@@ -5,6 +5,7 @@
 //   audio thread  -> Engine::render()           (never allocates, never locks)
 //   control/UI    -> setInstrument(), setVolume(), ... collectRetired()
 #pragma once
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -188,8 +189,10 @@ public:
     // Any thread: the output below 150 Hz in dBFS, peak-held for 150 ms (for mpe::Breath::setEcho).
     float outputLowDb() const { return lowDb_.load(std::memory_order_relaxed); }
 
-    // The looper (any thread may read its view; the control thread presses its buttons).
-    Looper& looper() { return *looper_; }
+    // The loops, each with its own length and layers (any thread may read a view; the control
+    // thread presses the buttons).
+    static constexpr int kLoops = 4;
+    Looper& looper(int i = 0) { return *loops_[std::min(std::max(i, 0), kLoops - 1)]; }
 
     int sampleRate() const { return sr_; }
     int currentInstrument(int part = 0) const { return current_[part]; }
@@ -220,7 +223,7 @@ private:
     std::unique_ptr<Channel[]> ch_;
     std::unique_ptr<Part[]> parts_;                 // 2; audio thread owns
     std::unique_ptr<Fx> fx_;
-    std::unique_ptr<Looper> looper_;
+    std::unique_ptr<Looper> loops_[kLoops];
     bool noteStarted_ = false;                      // a note started since the looper last looked
     std::atomic<InstrumentSet*> pending_[2] = {};
     Spsc<InstrumentSet*> retired_{8};
