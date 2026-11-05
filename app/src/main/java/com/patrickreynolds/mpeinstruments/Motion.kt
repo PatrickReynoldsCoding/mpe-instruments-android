@@ -67,6 +67,7 @@ object Motion : SensorEventListener {
     private var shakeEnv = 0f
     private var lastAccNs = 0L
     @Volatile private var rotation = Surface.ROTATION_0
+    @Volatile private var invert = BooleanArray(3)   // twist, tip, turn reversed
 
     fun setResumed(context: Context, on: Boolean) { resumed = on; refresh(context) }
 
@@ -76,6 +77,7 @@ object Motion : SensorEventListener {
         val want = (resumed || forced) && m.gyroOn
         if (want && !listening) start(context.applicationContext) else if (!want && listening) stop()
         rotation = display(context)?.rotation ?: Surface.ROTATION_0
+        invert = BooleanArray(3) { m.source(it).invert }
         // Not listening: every source off, so nothing is left acting on a stale reading.
         val live = listening || (forced && debugAngle != null)
         Native.nativeSetGyro(IntArray(4) { if (live) m.source(it).target else 0 }, FloatArray(4) { m.source(it).amount },
@@ -176,7 +178,8 @@ object Motion : SensorEventListener {
         val tip = -Math.toDegrees(sx).toFloat()                             // top edge away from you positive
         val turn = Math.toDegrees(sy).toFloat()                             // right edge away from you positive
         val shake = ((shakeEnv - SHAKE_FROM) / (SHAKE_FULL - SHAKE_FROM)).coerceIn(0f, 1f)
-        Native.nativeSetMotion(twist, tip, turn, shake)
+        val inv = invert
+        Native.nativeSetMotion(if (inv[0]) -twist else twist, if (inv[1]) -tip else tip, if (inv[2]) -turn else turn, shake)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}

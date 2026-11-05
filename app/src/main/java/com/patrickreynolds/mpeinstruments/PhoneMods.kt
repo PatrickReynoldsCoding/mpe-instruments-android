@@ -11,8 +11,11 @@ import androidx.compose.runtime.setValue
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
-/** What one gyro source does: a target (GyroSettings.TARGETS index) and its amount, in the target's unit. */
-data class GyroSource(val target: Int = 0, val amount: Float = 0f)
+/**
+ * What one gyro source does: a target (GyroSettings.TARGETS index), its amount in the target's
+ * unit, and for a turn whether its direction is reversed (anticlockwise, top towards you, left away).
+ */
+data class GyroSource(val target: Int = 0, val amount: Float = 0f, val invert: Boolean = false)
 
 /**
  * The phone itself as a controller: the gyro (its motion) and breath (the microphone). They change
@@ -35,7 +38,7 @@ data class PhoneMods(
 
     fun json() = JSONObject().apply {
         put("gyro", org.json.JSONArray().apply {
-            for (g in gyro) put(JSONObject().put("target", g.target).put("amount", g.amount.toDouble()))
+            for (g in gyro) put(JSONObject().put("target", g.target).put("amount", g.amount.toDouble()).put("invert", g.invert))
         })
         put("bendSnap", bendSnap.toDouble()); put("bendReset", bendReset)
         put("breath", breath); put("sensitivity", sensitivity.toDouble())
@@ -51,7 +54,8 @@ data class PhoneMods(
             val gyro = if (arr != null) List(4) { k ->
                 arr.optJSONObject(k)?.let { g ->
                     val t = g.optInt("target", 0).coerceIn(GyroSettings.TARGETS.indices)
-                    GyroSource(t, GyroSettings.clampAmount(t, g.optDouble("amount", GyroSettings.defaultAmount(t).toDouble()).toFloat()))
+                    GyroSource(t, GyroSettings.clampAmount(t, g.optDouble("amount", GyroSettings.defaultAmount(t).toDouble()).toFloat()),
+                               g.optBoolean("invert", false))
                 } ?: GyroSource()
             } else {
                 // Before the gyro: tilt was the twist, as vibrato (1), bend (2) or tone (3).

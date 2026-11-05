@@ -65,7 +65,10 @@ class DebugReceiver : BroadcastReceiver() {
             "PHONE" -> {
                 AppState.init(context)
                 PhoneControl.forceBreath = true                    // breath without the microphone permission
-                if (intent.hasExtra("angle")) { Motion.debugAngle = intent.getFloatExtra("angle", 0f); Native.nativeSetTilt(Motion.debugAngle!!) }
+                if (intent.hasExtra("angle")) {
+                    Motion.debugAngle = intent.getFloatExtra("angle", 0f)
+                    Native.nativeSetTilt(if (AppState.mods.source(0).invert) -Motion.debugAngle!! else Motion.debugAngle!!)
+                }
                 if (intent.getBooleanExtra("gyro", false)) Motion.debugAngle = null
                 if (intent.hasExtra("level")) Native.nativeDebugBreath(intent.getFloatExtra("level", -1f))
                 AppState.updateMods { m ->

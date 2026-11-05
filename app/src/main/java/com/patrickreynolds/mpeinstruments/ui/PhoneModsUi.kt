@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -92,25 +95,23 @@ fun liveModReading(): ModReading {
 }
 
 /**
- * One gyro source's meter. A turn: a needle from the middle, the full effect at the ends and the
- * dead zone shaded; dim while no finger is down (then the zero still follows the phone). A shake:
- * a bar filling from the left.
+ * One gyro source's meter, on one line. A turn: a needle from the middle, the full effect at the
+ * ends and the dead zone shaded; dim while no finger is down (then the zero still follows the
+ * phone). A shake: a bar filling from the left. Dim and empty while the source is off.
  */
 @Composable
 fun GyroMeter(r: ModReading, source: Int, target: Int, modifier: Modifier = Modifier) {
     val accent = PartColors[0]
-    val v = r.axis.getOrElse(source) { 0f }
-    Column(modifier.fillMaxWidth()) {
-        Canvas(Modifier.fillMaxWidth().height(30.dp)) { gyroBar(v, source, target, r.held || source == 3, accent, Eink) }
-        Row(Modifier.fillMaxWidth()) {
-            Text(when {
-                source == 3 -> "Shake the phone"
-                r.held -> "Zero set: move the phone to play"
-                else -> "The zero follows the phone until you play"
-            }, color = TextDim, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            Text(if (source == 3) "${(v * 100).roundToInt()}%" else v.roundToInt().let { if (it == 0) "0°" else "%+d°".format(it) }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                 color = if (r.held || source == 3) accent else TextDim)
-        }
+    val v = if (target == 0) 0f else r.axis.getOrElse(source) { 0f }
+    val live = target != 0 && (r.held || source == 3)
+    Row(modifier.fillMaxWidth().height(28.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Canvas(Modifier.weight(1f).height(22.dp)) { gyroBar(v, source, target, live, accent, Eink) }
+        Text(when {
+            target == 0 -> "off"
+            source == 3 -> "${(v * 100).roundToInt()}%"
+            else -> v.roundToInt().let { if (it == 0) "0°" else "%+d°".format(it) }
+        }, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (live) accent else TextDim,
+           textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(48.dp))
     }
 }
 
@@ -201,35 +202,50 @@ private val TARGET_HELP = mapOf(
     GyroSettings.DELAY to "More of the sound goes into the delay.",
 )
 
-/** The gyro: pick a source (twist, tip, turn, shake), then what it does and how much. */
+/**
+ * The gyro: pick a source (twist, tip, turn, shake), then what it does and how much. The source
+ * tabs and the source's meter stay at the top; with [scroll], only what is below them scrolls.
+ */
 @Composable
-fun GyroControls(r: ModReading) {
+fun GyroPanel(r: ModReading, scroll: Boolean) {
     val m = AppState.mods
     var src by remember { mutableIntStateOf(m.gyro.indexOfFirst { it.target != 0 }.coerceAtLeast(0)) }
-    val g = m.source(src)
     Segmented(PhoneMods.SOURCES.mapIndexed { k, n -> if (m.source(k).target != 0) "$n •" else n }, src) { src = it }
-    Text(SOURCE_HELP[src], color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    if (Motion.available == false && m.gyroOn) Text("This phone has no gyroscope, so the gyro cannot work here.", color = Warn, fontSize = 13.sp)
+    else GyroMeter(r, src, m.source(src).target, Modifier.padding(top = 4.dp))
+    HorizontalDivider(color = Line)
+    Column(if (scroll) Modifier.verticalScroll(rememberScrollState()) else Modifier) { GyroControls(src) }
+}
+
+@Composable
+private fun GyroControls(src: Int) {
+    val m = AppState.mods
+    val g = m.source(src)
+    Text(SOURCE_HELP[src] + if (src < 3 && g.target != 0) " " + (if (g.invert) "Reversed: the other way is up." else "") else "",
+         color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
     Text("Controls", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
     Chips(GyroSettings.TARGETS, g.target) { t ->
-        AppState.updateMods { it.withSource(src) { GyroSource(t, GyroSettings.defaultAmount(t)) } } }
-    if (g.target != 0) {
-        TARGET_HELP[g.target]?.let { Text(it, color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
-        val full = if (src == 3) "at a hard shake" else if (g.target == GyroSettings.VIBRATO) "at a firm wobble" else "at a 30° turn"
-        if (g.target == GyroSettings.BEND) {
-            Text("Bend $full", fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-            val i = GyroSettings.BEND_RANGES.indexOfFirst { abs(it - g.amount) < 0.01f }
-            Chips(GyroSettings.BEND_RANGES.map { "±${it.roundToInt()}" }, i) { k ->
-                AppState.updateMods { it.withSource(src) { s -> s.copy(amount = GyroSettings.BEND_RANGES[k]) } } }
-        } else {
-            val range = GyroSettings.range(g.target)
-            LabeledSlider("Amount $full", g.amount, range, GyroSettings.amountName(g.target, g.amount)) { v ->
-                AppState.updateMods { it.withSource(src) { s -> s.copy(amount = v) } } }
-        }
-        if (Motion.available == false) Text("This phone has no gyroscope, so the gyro cannot work here.", color = Warn, fontSize = 13.sp)
-        else GyroMeter(r, src, g.target, Modifier.padding(top = 6.dp))
+        AppState.updateMods { it.withSource(src) { s -> GyroSource(t, GyroSettings.defaultAmount(t), s.invert) } } }
+    if (g.target == 0) return
+    TARGET_HELP[g.target]?.let { Text(it, color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
+    if (src < 3) SwitchRow("Reverse", g.invert, when (src) {
+        0 -> "Anticlockwise is up (or more)"
+        1 -> "Tipping the top edge towards you is up (or more)"
+        else -> "Turning the left edge away from you is up (or more)"
+    }) { v -> AppState.updateMods { it.withSource(src) { s -> s.copy(invert = v) } } }
+    val full = if (src == 3) "at a hard shake" else if (g.target == GyroSettings.VIBRATO) "at a firm wobble" else "at a 30° turn"
+    if (g.target == GyroSettings.BEND) {
+        Text("Bend $full", fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+        val i = GyroSettings.BEND_RANGES.indexOfFirst { abs(it - g.amount) < 0.01f }
+        Chips(GyroSettings.BEND_RANGES.map { "±${it.roundToInt()}" }, i) { k ->
+            AppState.updateMods { it.withSource(src) { s -> s.copy(amount = GyroSettings.BEND_RANGES[k]) } } }
+    } else {
+        val range = GyroSettings.range(g.target)
+        LabeledSlider("Amount $full", g.amount, range, GyroSettings.amountName(g.target, g.amount)) { v ->
+            AppState.updateMods { it.withSource(src) { s -> s.copy(amount = v) } } }
     }
-    // Bends, whichever source makes them.
-    if (m.gyro.any { it.target == GyroSettings.BEND }) {
+    // Bends: only with this source on Bend (the settings are shared by every source that bends).
+    if (g.target == GyroSettings.BEND) {
         HorizontalDivider(color = Line, modifier = Modifier.padding(vertical = 10.dp))
         Text("Bends", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         LabeledSlider("Snap to semitones", m.bendSnap, 0f..1f,
@@ -299,7 +315,7 @@ fun ExperimentalCard() {
         Spacer(Modifier.height(12.dp))
         Text("Gyro (the phone's motion)", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))
-        GyroControls(r)
+        GyroPanel(r, scroll = false)
         HorizontalDivider(color = Line, modifier = Modifier.padding(vertical = 12.dp))
         Text("Breath (the microphone)", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))
