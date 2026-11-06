@@ -67,11 +67,13 @@ object AppState {
         private set
     /** What the controller sets in the engine beside the sound. */
     val shape get() = controller.shape
-    /** Two parts sound: split by the controller, or layered. */
-    val twoParts get() = perf.layout(shape) != 0
-    /** Which part (sound) the rail is changing: 0, or 1 (the right of a split, the layer). */
+    /** How many parts sound: 1, a split's sections (2 to 4), or 2 layered. */
+    val partCount get() = perf.partCount(shape)
+    /** More than one part sounds: split by the controller, or layered. */
+    val twoParts get() = partCount > 1
+    /** Which part (sound) the rail is changing: 0, or another (a section of a split, the layer). */
     var side by mutableStateOf(0)
-    val part get() = if (twoParts) side.coerceIn(0, 1) else 0
+    val part get() = side.coerceIn(0, partCount - 1)
     /** The rail tucked away, the whole screen to play on. */
     var railHidden by mutableStateOf(false)
         private set
@@ -150,7 +152,7 @@ object AppState {
     /** Send everything to the engine (at start, and after the audio engine was rebuilt). */
     fun applyAll() {
         Native.nativeSetVolume(volume)
-        partOneBuilt = false
+        built.fill(false)
         applyEngine(null)
         PhoneControl.apply(appContext, mods)
         Looper.snap(loopSnap)
@@ -161,8 +163,8 @@ object AppState {
 
     fun instrument(part: Int) = instruments.getOrNull(index(perf.part(part).instrument))
 
-    /** Part 1 is only built when a split or layer needs it: 15 more copies of an instrument. */
-    private var partOneBuilt = false
+    /** Parts after the first are only built when a split or layer needs them: 15 more copies of an instrument each. */
+    private val built = BooleanArray(PARTS)
 
     /** The sound and the controller's shape to the engine; instruments only where they changed. */
     private fun applyEngine(old: Perf?) {
@@ -170,10 +172,11 @@ object AppState {
         Native.nativeSetTranspose(s.transpose)
         Native.nativeSetBendRange(s.bendRange)
         if (old == null || old.part(0).instrument != perf.part(0).instrument) Native.nativeSetPartInstrument(0, index(perf.part(0).instrument))
-        if (twoParts && (!partOneBuilt || old == null || old.part(1).instrument != perf.part(1).instrument)) {
-            Native.nativeSetPartInstrument(1, index(perf.part(1).instrument))
-            partOneBuilt = true
-        }
+        for (k in 1 until partCount)
+            if (!built[k] || old == null || old.part(k).instrument != perf.part(k).instrument) {
+                Native.nativeSetPartInstrument(k, index(perf.part(k).instrument))
+                built[k] = true
+            }
         Native.nativeSetPerformance(perf.toArray(s))
     }
 
@@ -196,7 +199,7 @@ object AppState {
         val d = com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(id)
         update { p ->
             val q = p.withPart(k) { d.applyTo(it, id) }
-            if (twoParts && k == 1) q else q.copy(reverbSize = d.reverbSize, reverbDamp = d.reverbDamp)
+            if (twoParts && k >= 1) q else q.copy(reverbSize = d.reverbSize, reverbDamp = d.reverbDamp)
         }
     }
 
@@ -323,9 +326,9 @@ object AppState {
     }
 
     /** What is playing now, as a name: the instrument, or both of a split or layer. */
-    fun soundName(p: Perf = perf, two: Boolean = twoParts): String {
+    fun soundName(p: Perf = perf, count: Int = partCount): String {
         fun n(i: Int) = instruments.firstOrNull { it.id == p.part(i).instrument }?.name ?: "Preset"
-        return if (!two) n(0) else "${n(0)} + ${n(1)}"
+        return (0 until count).joinToString(" + ") { n(it) }
     }
 
     /** Keep what is playing now as a new preset of yours (after the one on view), and switch to it. */
@@ -398,7 +401,7 @@ object AppState {
         val made = mutableListOf<Preset>()
         for (part in parts) {
             val p = Perf(parts = listOf(part, Part(instrument = "voices/soprano")))
-            val base = soundName(p, two = false)
+            val base = soundName(p, count = 1)
             val taken = (BUILT_IN_PRESETS + userPresets + made).map { it.name }.toSet()
             var name = base; var n = 2
             while (name in taken) name = "$base ${n++}"

@@ -28,8 +28,11 @@ interface Controller {
     /** What it sets in the engine beside the sound: a split, the arps, pitch assist, transpose. */
     val shape: EngineShape
 
-    /** The parts (sounds) it plays, by name, when it splits the notes between two: "Left", "Right". */
+    /** The parts (sounds) it plays, by name, when it splits the notes between them: "Left", "Right". */
     val splitNames: List<String>? get() = null
+
+    /** Its own colour for each part, so the rail matches what is on screen; null for the app's. */
+    val partColors: List<androidx.compose.ui.graphics.Color>? get() = null
 
     /** Its settings, kept between sessions and in each preset. */
     fun save(): JSONObject

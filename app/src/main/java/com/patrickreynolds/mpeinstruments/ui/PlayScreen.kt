@@ -82,7 +82,7 @@ fun PlayScreen(stats: Stats?, openPlay: () -> Unit, openSetup: () -> Unit) {
             Text("Built in. Each keeps its own settings; the sound, effects, loops and presets are shared.",
                  color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         }
-        val parts = if (AppState.twoParts) listOf(0, 1) else listOf(0)
+        val parts = (0 until AppState.partCount).toList()
         SectionCard(AppState.presetName.ifEmpty { "Playing" }) {
             for (k in parts) InstrumentRow(k, label = partLabel(k))
             LabeledSlider("Volume", AppState.volume, 0f..1f, pct(AppState.volume)) { AppState.changeVolume(it) }
@@ -133,7 +133,7 @@ private fun ControllerCard(open: () -> Unit) {
 }
 
 /** A part's name, when there are two: the split's ("Left", "Right"), or "Main" and "Layer". */
-fun partLabel(k: Int) = if (!AppState.twoParts) "" else (AppState.controller.splitNames ?: listOf("Main", "Layer"))[k]
+fun partLabel(k: Int) = if (!AppState.twoParts) "" else (AppState.controller.splitNames ?: listOf("Main", "Layer")).getOrElse(k) { "${k + 1}" }
 
 /** Library: your presets and the built-in ones, the instrument packs and their sounds, the controllers. */
 @Composable
@@ -198,8 +198,11 @@ internal fun presetSummary(p: Preset): String {
     val split = pad && s?.optBoolean("split") == true
     fun desc(k: Int) = name(p.perf.part(k).instrument) +
         if (pad && s?.optJSONObject("arp$k")?.optBoolean("arp") == true) " arp" else ""
+    val gridParts = if (p.controller == com.patrickreynolds.mpeinstruments.controllers.KeyGrid.id)
+        (s?.optJSONArray("splits")?.length() ?: 0) + 1 else 1
     val sound = when {
         split -> "${desc(0)} | ${desc(1)}"
+        gridParts > 1 -> (gridParts - 1 downTo 0).joinToString(" / ") { name(p.perf.part(it).instrument) }
         p.perf.layered -> "${desc(0)} + ${name(p.perf.part(1).instrument)}"
         else -> desc(0)
     }

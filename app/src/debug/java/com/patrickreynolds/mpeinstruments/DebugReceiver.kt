@@ -47,7 +47,8 @@ class DebugReceiver : BroadcastReceiver() {
                     "ageAvgMs=${s.eventAgeAvgMs} ageMaxMs=${s.eventAgeMaxMs} outLatencyMs=${s.outputLatencyMs} " +
                     "rate=${s.sampleRate} burst=${s.burstFrames} buffer=${s.bufferFrames} xruns=${s.xruns} " +
                     "exclusive=${s.exclusive} path=${s.pathName.replace(' ', '_')} loadAvg=${s.loadAvg} loadPeak=${s.loadPeak} restarts=${s.streamRestarts} " +
-                    "arpSteps=${s.arpSteps} noteCenter=${s.noteCenter}")
+                    "arpSteps=${s.arpSteps} noteCenter=${s.noteCenter} parts=" +
+                    FloatArray(64 * 8).let { v -> (0 until Native.nativeVoices(v)).joinToString(",") { "${v[8 * it].toInt()}:${v[8 * it + 2].toInt()}" } })
             }
             "SET" -> {
                 // Through AppState, so the screen and the saved settings agree with what is playing.

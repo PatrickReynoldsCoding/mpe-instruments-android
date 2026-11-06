@@ -49,6 +49,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.nativeCanvas
@@ -137,8 +138,9 @@ fun TouchPadSurface(@Suppress("UNUSED_PARAMETER") part: Int) {
             val ps = TouchPad.pads[k]
             val drums = AppState.instrument(k)?.group == "drums"
             val (a, b) = if (!split) 0f to 1f else if (k == 0) 0f to TouchPad.splitAt else TouchPad.splitAt to 1f
-            val f = pickerFrac(ps, drums, (b - a) * maxWidth.value)
-            if (f > 0f) ChordPicker(k, ps, theme, Modifier.offset(x = maxWidth * a).width(maxWidth * (b - a) * f)
+            // Its size as on a whole screen; a split only hides what does not fit.
+            val f = minOf(pickerFrac(ps, drums, maxWidth.value), b - a)
+            if (f > 0f) ChordPicker(k, ps, theme, Modifier.offset(x = maxWidth * a).width(maxWidth * f)
                                                         .height(maxHeight - STRIP))
         }
     }
@@ -332,7 +334,10 @@ private class Pad {
     class Zone(val part: Int) {
         var s = PadSettings()
         var drums = false                          // a drum kit: each column is a drum, struck, not pitched
-        var start = 0f                             // where the pad begins; its notes begin at x0, after a chord picker
+        var start = 0f; var end = 1f               // the part of the screen the pad shows
+        // Its notes, from x0 to x1, laid out as on a whole screen (after a chord picker). Split, a pad
+        // keeps that size and shows only what fits on its side: the left one from its left end, the
+        // right one up to its right end. Moving the divide shows more or fewer columns; none stretch.
         var x0 = 0f; var x1 = 1f
         val chords get() = s.chordMode != 0 && !drums
         var columns = IntArray(8) { 60 + it }      // sounding note of each column
@@ -411,12 +416,15 @@ private class Pad {
     fun layout(pads: List<PadSettings>, split: Boolean, at: Float, centers: FloatArray, drums: BooleanArray, t: PadTheme) {
         val n = if (split) 2 else 1
         if (n != zones.size) { releaseAll(); zones = List(n) { Zone(it) } }
-        val x1 = if (split) at else 1f
+        val mid = if (split) at else 1f
         for ((k, z) in zones.withIndex()) {
-            val (a, b) = if (k == 0) 0f to x1 else x1 to 1f
-            val notesAt = a + pickerFrac(pads[k], drums[k], (b - a) * widthDp) * (b - a)
-            if (z.s != pads[k] || z.x0 != notesAt || z.x1 != b || z.drums != drums[k]) dirty = true
-            z.start = a; z.x0 = notesAt; z.x1 = b
+            val (a, b) = if (k == 0) 0f to mid else mid to 1f
+            val picker = pickerFrac(pads[k], drums[k], widthDp)
+            val notesAt = a + minOf(picker, b - a)
+            val notesW = 1f - picker                       // the notes' width on a whole screen
+            val (x0, x1) = if (k == 0) notesAt to notesAt + notesW else (1f - notesW) to 1f
+            if (z.s != pads[k] || z.x0 != x0 || z.x1 != x1 || z.start != a || z.end != b || z.drums != drums[k]) dirty = true
+            z.start = a; z.end = b; z.x0 = x0; z.x1 = x1
             val before = z.columns
             z.set(pads[k], centers[k], drums[k])
             // A new chord: fingers held on this pad move to the same column of it, so the sound
@@ -662,7 +670,7 @@ private class Pad {
         }
         val held = zones.map { z -> fingers.values.filter { zones.getOrNull(it.zone) === z }
                                          .map { if (z.drums) it.col else columnAt(z.columns, xOf(z, it.pitch)) }.toSet() }
-        for ((zi, z) in zones.withIndex()) {
+        for ((zi, z) in zones.withIndex()) clipRect(left = z.start * w, right = z.end * w) {
             val left = z.x0 * w
             val cw = z.w * w / z.columns.size
             val c = colorOf(zi)

@@ -145,7 +145,7 @@ private:
     std::atomic<bool> loopSnap_{true};
 
     // settings
-    std::atomic<int> instrument_[2] = {{0}, {-1}}, transpose_{0}, watchdogMs_{0};
+    std::atomic<int> instrument_[mpe::kParts] = {{0}, {-1}, {-1}, {-1}}, transpose_{0}, watchdogMs_{0};
     mpe::Performance perf_;                         // guarded by mu_
     std::atomic<float> volume_{0.8f}, bendRange_{48.f};
 };

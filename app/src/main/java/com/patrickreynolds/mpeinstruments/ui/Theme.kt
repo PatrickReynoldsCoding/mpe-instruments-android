@@ -48,7 +48,7 @@ class Palette(
 val DarkPalette = Palette(
     ink = Color(0xFF0E1014), panel = Color(0xFF181B22), panelHigh = Color(0xFF222632), line = Color(0xFF2E3341),
     text = Color(0xFFECEFF5), textDim = Color(0xFF9AA2B4),
-    parts = listOf(Color(0xFFFF8A65), Color(0xFF4DD0E1)), warn = Color(0xFFFFC857), danger = Color(0xFFFF6B6B), eink = false,
+    parts = listOf(Color(0xFFFF8A65), Color(0xFF4DD0E1), Color(0xFFAEEA70), Color(0xFFC792EA)), warn = Color(0xFFFFC857), danger = Color(0xFFFF6B6B), eink = false,
 )
 
 /**
@@ -58,7 +58,7 @@ val DarkPalette = Palette(
 val EinkPalette = Palette(
     ink = Color.White, panel = Color.White, panelHigh = Color.White, line = Color.Black,
     text = Color.Black, textDim = Color(0xFF333333),
-    parts = listOf(Color.Black, Color(0xFF666666)), warn = Color.Black, danger = Color.Black, eink = true,
+    parts = listOf(Color.Black, Color(0xFF666666), Color(0xFF333333), Color(0xFF999999)), warn = Color.Black, danger = Color.Black, eink = true,
 )
 
 /** The palette in use; read in composition, so changing it recolours everything. */
@@ -70,7 +70,7 @@ val PanelHigh get() = palette.panelHigh
 val Line get() = palette.line
 val Fg get() = palette.text
 val TextDim get() = palette.textDim
-/** Part 0 (main, left of a split) and part 1 (layer, right of a split). */
+/** Part 0 (main, left of a split), part 1 (layer, right of a split), and a grid's third and fourth sections. */
 val PartColors get() = palette.parts
 val Warn get() = palette.warn
 val Danger get() = palette.danger

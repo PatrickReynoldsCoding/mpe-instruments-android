@@ -52,6 +52,10 @@ import com.patrickreynolds.mpeinstruments.controllers.TouchPad
 import com.patrickreynolds.mpeinstruments.releaseName
 
 /** The rail's colours: the touch pad's look while it is in use, else the default one. */
+/** The colour of part [k] on the rail: the controller's own, else the theme's, else the app's. */
+fun partColor(t: PadTheme, k: Int): Color =
+    AppState.controller.partColors?.getOrNull(k) ?: t.parts.getOrNull(k) ?: PartColors.getOrElse(k) { PartColors[0] }
+
 fun hostTheme() = if (AppState.controller === TouchPad) padTheme(TouchPad.pad) else padTheme(PadSettings())
 
 /**
@@ -71,9 +75,18 @@ fun PlayHost(onClose: () -> Unit) {
     val shared = sharedOptions(part)
     val pickController = Option("Controller", c.name, perPart = false) { ControllerPicker { panel = null } }
     Box(Modifier.fillMaxSize().background(theme.bottom)) {
+        // An upright controller (the grid) keeps its size and place: the rail lies over it rather than
+        // squeezing it, hiding what is under it until it is tucked away again.
+        val over = c.upright
+        if (over) Box(Modifier.fillMaxSize()) {
+            key(c.id) { c.Surface(part) }
+            if (AppState.loopDock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
+        }
         Row(Modifier.fillMaxSize()) {
-            if (!AppState.railHidden) Rail(pickController, own, shared, theme, panel, { panel = if (panel == it) null else it }, onClose)
-            Box(Modifier.weight(1f).fillMaxHeight()) {
+            if (!AppState.railHidden) Box(if (over) Modifier.background(theme.bottom) else Modifier) {
+                Rail(pickController, own, shared, theme, panel, { panel = if (panel == it) null else it }, onClose)
+            }
+            if (!over) Box(Modifier.weight(1f).fillMaxHeight()) {
                 // A new surface for each controller: the old one lets go of its notes as it goes.
                 key(c.id) { c.Surface(part) }
                 if (AppState.loopDock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
@@ -99,7 +112,7 @@ fun PlayHost(onClose: () -> Unit) {
 @Composable
 private fun sharedOptions(k: Int): List<Option> {
     val part = AppState.perf.part(k)
-    val accent = if (Eink) Color.Black else PartColors[k]
+    val accent = if (Eink) Color.Black else partColor(hostTheme(), k)
     val two = AppState.twoParts
     return listOfNotNull(
         Option("Presets", AppState.presetName.ifEmpty { "None" }, perPart = false) {
@@ -118,10 +131,10 @@ private fun sharedOptions(k: Int): List<Option> {
                     Text("As the pack means it (${AppState.instrument(k)?.name ?: "this sound"})", color = accent) }
                 LabeledSlider("Level", part.volume, 0f..1.5f, pct(part.volume), accent = accent) { v ->
                     AppState.updatePart(k) { it.copy(volume = v) } }
-                Text(if (two) "Reverb (both sounds)" else "Reverb", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                Text(if (two) "Reverb (all the sounds)" else "Reverb", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                      modifier = Modifier.padding(top = 12.dp))
                 ReverbControls()
-                Text(if (two) "Delay (both sounds)" else "Delay", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                Text(if (two) "Delay (all the sounds)" else "Delay", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                      modifier = Modifier.padding(top = 12.dp))
                 DelayControls()
             }
@@ -171,7 +184,7 @@ private fun ControllerPicker(done: () -> Unit) {
 @Composable
 private fun Rail(pick: Option, own: List<Option>, shared: List<Option>, t: PadTheme, open: String?,
                  tap: (String) -> Unit, onClose: () -> Unit) {
-    val accent = t.parts[AppState.part]
+    val accent = partColor(t, AppState.part)
     Column(Modifier.fillMaxHeight().width(92.dp).background(t.rail)
                .then(if (t.flat) Modifier.border(BorderStroke(2.dp, Color.Black)) else Modifier)
                .verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
@@ -208,23 +221,28 @@ private fun RailItem(o: Option, open: Boolean, t: PadTheme, accent: Color, tap: 
     }
 }
 
-/** Which of two sounds the rail changes: the left or right pad of a split, or the main sound or its layer. */
+/**
+ * Which sound the rail changes: the left or right pad of a split, the main sound or its layer, or
+ * one of a grid's sections (more than two: stacked as on the grid, the top one at the top).
+ */
 @Composable
 private fun PartToggle(names: List<String>, t: PadTheme) {
-    Row(Modifier.padding(horizontal = 6.dp).fillMaxWidth().height(34.dp)
-            .border(BorderStroke(if (t.flat) 2.dp else 1.dp, if (t.flat) Color.Black else t.railDim), RoundedCornerShape(8.dp))) {
-        for (k in 0..1) {
-            val on = k == AppState.part
-            Box(Modifier.weight(1f).fillMaxHeight()
-                    .background(when { !on -> Color.Transparent; t.flat -> Color.Black; else -> t.parts[k].copy(alpha = 0.3f) },
-                                RoundedCornerShape(8.dp))
-                    .clickable { AppState.side = k },
-                contentAlignment = Alignment.Center) {
-                Text(names[k], fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
-                     color = when { on && t.flat -> Color.White; on -> t.parts[k]; else -> t.railText })
-            }
+    val n = AppState.partCount
+    @Composable
+    fun cell(k: Int, m: Modifier) {
+        val on = k == AppState.part
+        val col = partColor(t, k)
+        Box(m.background(when { !on -> Color.Transparent; t.flat -> Color.Black; else -> col.copy(alpha = 0.3f) }, RoundedCornerShape(8.dp))
+                .clickable { AppState.side = k },
+            contentAlignment = Alignment.Center) {
+            Text(names.getOrElse(k) { "${k + 1}" }, fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                 maxLines = 1, color = when { on && t.flat -> Color.White; on -> col; else -> t.railText })
         }
     }
+    val edge = Modifier.padding(horizontal = 6.dp).fillMaxWidth()
+        .border(BorderStroke(if (t.flat) 2.dp else 1.dp, if (t.flat) Color.Black else t.railDim), RoundedCornerShape(8.dp))
+    if (n <= 2) Row(edge.height(34.dp)) { for (k in 0 until n) cell(k, Modifier.weight(1f).fillMaxHeight()) }
+    else Column(edge) { for (k in n - 1 downTo 0) cell(k, Modifier.fillMaxWidth().height(30.dp)) }
 }
 
 @Composable
@@ -235,7 +253,7 @@ private fun SettingPanel(o: Option, part: Int, t: PadTheme, close: () -> Unit) {
             border = if (t.flat) BorderStroke(Edge, Color.Black) else null) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (AppState.twoParts && o.perPart) "${o.label} · ${names[part].lowercase()}" else o.label,
+                Text(if (AppState.twoParts && o.perPart) "${o.label} · ${names.getOrElse(part) { "${part + 1}" }.lowercase()}" else o.label,
                      fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 TextButton(onClick = close) { Text("Done") }
             }

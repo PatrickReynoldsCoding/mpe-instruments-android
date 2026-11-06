@@ -94,7 +94,7 @@ bool Synth::open() {
     for (int t = 0; t < mpe::Engine::kLoops; t++) eng->looper(t).setSnap(loopSnap_);
     eng->setBreathMode(mpe::BreathMode(breathMode_.load()));
     eng->setInstrument(0, instrument_[0]);
-    if (instrument_[1] >= 0) eng->setInstrument(1, instrument_[1]);
+    for (int k = 1; k < mpe::kParts; k++) if (instrument_[k] >= 0) eng->setInstrument(k, instrument_[k]);
     {
         std::lock_guard<std::mutex> g(mu_);
         eng->setPerformance(perf_);
@@ -305,7 +305,7 @@ void Synth::detachMidi() {
 }
 
 void Synth::setInstrument(int part, int index) {
-    if (part < 0 || part > 1) return;
+    if (part < 0 || part >= mpe::kParts) return;
     instrument_[part] = index;
     if (auto e = engine()) { e->setInstrument(part, index); }
 }

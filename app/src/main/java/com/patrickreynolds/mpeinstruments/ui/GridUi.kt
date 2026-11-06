@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -65,12 +66,15 @@ import kotlin.math.floor
 import kotlin.math.log10
 import kotlin.math.roundToInt
 
-/** The grid's options on the rail. */
+/** The grid's options on the rail; the notes and the arp are those of section [part] (the bottom one, or the only one). */
 @Composable
-fun keyGridOptions(): List<Option> {
+fun keyGridOptions(part: Int): List<Option> {
     val s = KeyGrid.settings
-    val accent = if (Eink) Color.Black else gridTheme(s).light
+    val k0 = part.coerceIn(0, s.count - 1)
+    val sec = s.section(k0)
+    val accent = if (Eink) Color.Black else sectionLook(s, k0).light
     fun set(change: (KeyGrid.Settings) -> KeyGrid.Settings) = KeyGrid.update(change)
+    fun setSec(change: (KeyGrid.Section) -> KeyGrid.Section) = KeyGrid.update { it.withSection(k0, change) }
     return listOf(
         Option("Grid", "${s.cols} × ${if (s.fillRows) "fill" else s.rows}", perPart = false) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -94,15 +98,30 @@ fun keyGridOptions(): List<Option> {
                      color = TextDim, fontSize = 12.sp)
             }
         },
-        Option("Notes", if (s.chromatic) "Chromatic" else SCALES[s.scale].name, perPart = false) {
+        Option("Split", if (s.count == 1) "Off" else "${s.count} parts", perPart = false) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Segmented(listOf("The scale's notes", "Chromatic"), if (s.chromatic) 1 else 0, accent) { k -> set { it.copy(chromatic = k == 1) } }
-                Text(if (s.chromatic) "Every semitone; the notes outside the scale are dimmed, their outlines broken."
+                Segmented(listOf("Off", "2", "3", "4"), s.count - 1, accent) { k -> KeyGrid.splitInto(k + 1) }
+                Text("Lines across the grid make sections, from the bottom up, each its own sound, colour, notes and arp. " +
+                     "Pick a section with the switch at the top of the rail; Sound, Effects, Notes and Arp then change that one.",
+                     color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                if (s.count > 1) Text("Drag the tab at the right end of a line to move it a row at a time. The squares stay as they are: " +
+                                      "a section shows more or less of its own grid.", color = TextDim, fontSize = 12.sp,
+                                      modifier = Modifier.padding(top = 6.dp))
+            }
+        },
+        Option("Notes", if (sec.chromatic) "Chromatic" else SCALES[sec.scale].name) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Segmented(listOf("The scale's notes", "Chromatic"), if (sec.chromatic) 1 else 0, accent) { k -> setSec { it.copy(chromatic = k == 1) } }
+                Text(if (sec.chromatic) "Every semitone; the notes outside the scale are dimmed, their outlines broken."
                      else "Only the scale's notes, so every square fits.", color = TextDim, fontSize = 12.sp)
                 Text("Scale", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                Chips(SCALES.drop(1).map { it.name }, s.scale - 1, accent) { k -> set { it.copy(scale = k + 1) } }
+                Chips(SCALES.drop(1).map { it.name }, sec.scale - 1, accent) { k -> setSec { it.copy(scale = k + 1) } }
                 Text("Key", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                Chips(NOTE_NAMES, s.key, accent) { k -> set { it.copy(key = k) } }
+                Chips(NOTE_NAMES, sec.key, accent) { k -> setSec { it.copy(key = k) } }
+                if (s.count > 1) {
+                    Text("This section's octave", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                    Chips(listOf("−3", "−2", "−1", "0", "+1", "+2", "+3"), sec.octave + 3, accent) { k -> setSec { it.copy(octave = k - 3) } }
+                }
                 SwitchRow("Note names", s.labels, "The root's square is lit either way", accent = accent) { v -> set { it.copy(labels = v) } }
             }
         },
@@ -110,8 +129,15 @@ fun keyGridOptions(): List<Option> {
             if (Eink) Text("E-ink is on (Settings), so the grid is black on white.", color = TextDim, fontSize = 12.sp)
             else Chips(GRID_THEMES.map { it.name }, s.theme.coerceIn(GRID_THEMES.indices), accent) { k -> set { it.copy(theme = k) } }
         },
-        Option("Octave", if (s.octave == 0) "0" else "%+d".format(s.octave), perPart = false) {
+        Option("Octave", (if (s.octave == 0) "0" else "%+d".format(s.octave)) + if (s.scroll != 0) " · %+d".format(s.scroll) else "", perPart = false) {
             Chips(listOf("−3", "−2", "−1", "0", "+1", "+2", "+3"), s.octave + 3, accent) { k -> set { it.copy(octave = k - 3) } }
+            if (s.count > 1) Text("Moves every section; each also has its own, under Notes.", color = TextDim, fontSize = 12.sp)
+            LabeledSlider("Scroll", s.scroll.toFloat(), KeyGrid.SCROLL.first.toFloat()..KeyGrid.SCROLL.last.toFloat(),
+                          if (s.scroll == 0) "0 rows" else "%+d rows".format(s.scroll), accent = accent,
+                          steps = KeyGrid.SCROLL.last - KeyGrid.SCROLL.first - 1) { v -> set { it.copy(scroll = v.roundToInt()) } }
+            Text("Slides the rows up or down through every note, as the Scroll strip beside the grid does.",
+                 color = TextDim, fontSize = 12.sp)
+            TextButton(onClick = { set { it.copy(scroll = 0) } }) { Text("Back to the middle", color = accent) }
         },
         Option("Across", KeyGrid.TARGETS[s.xTarget], perPart = false) {
             Chips(KeyGrid.TARGETS, s.xTarget, accent) { k -> set { it.copy(xTarget = k) } }
@@ -141,10 +167,10 @@ fun keyGridOptions(): List<Option> {
                      color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
         },
-        Option("Arp", if (s.arp.on) ARP_ORDERS[s.arp.order] else "Off", perPart = false) {
+        Option("Arp", if (sec.arp.on) ARP_ORDERS[sec.arp.order] else "Off") {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                ArpControls(s.arp, accent, latch = false) { c -> set { it.copy(arp = c(it.arp)) } }
-                if (s.arp.on) Text("To keep it going after you lift your hand, turn on Latch.", color = TextDim, fontSize = 12.sp)
+                ArpControls(sec.arp, accent, latch = false) { c -> setSec { it.copy(arp = c(it.arp)) } }
+                if (sec.arp.on) Text("To keep it going after you lift your hand, turn on Latch.", color = TextDim, fontSize = 12.sp)
                 TempoControls(accent)
             }
         },
@@ -165,7 +191,7 @@ fun keyGridOptions(): List<Option> {
 
 private val SIDE_HELP = listOf(
     "tap to latch, tap again to let go", "press and hold to sustain", "tap to arpeggiate",
-    "slide for the octave", "slide to bend every note, springs back", "slide to brighten or darken every note")
+    "slide the rows up and down through every note", "slide to bend every note, springs back", "slide to brighten or darken every note")
 
 @Composable
 private fun AxisHelp() = Text(
@@ -187,8 +213,24 @@ val GRID_THEMES = listOf(
     GridTheme("Sunset", Color(0xFF0E0610), Color(0xFF2A1226), Color(0xFFFF5FA2), Color(0xFFFFE0EE), Color(0xFF3A0020)),
     GridTheme("Paper", Color(0xFFEDE9E1), Color(0xFFFFFFFF), Color(0xFF0E7C66), Color(0xFF6FE3C6), Color(0xFFFFFFFF), bright = true),
 )
-private val NEON = GRID_THEMES[0].light
 private fun gridTheme(s: KeyGrid.Settings) = GRID_THEMES.getOrElse(s.theme) { GRID_THEMES[0] }
+
+/** A section's colours: the theme's for the first; the other sections take the other themes' (darker ones on Paper). */
+class SectionLook(val light: Color, val hot: Color, val onLight: Color)
+
+fun sectionLook(s: KeyGrid.Settings, k: Int): SectionLook {
+    val th = gridTheme(s)
+    if (k == 0) return SectionLook(th.light, th.hot, th.onLight)
+    if (th.bright) return listOf(SectionLook(Color(0xFFC0501E), Color(0xFFFFB08A), Color.White),
+                                 SectionLook(Color(0xFF2860B8), Color(0xFF9CC2FF), Color.White),
+                                 SectionLook(Color(0xFF7A3FB0), Color(0xFFD7B5FF), Color.White))[(k - 1) % 3]
+    val others = GRID_THEMES.filter { it !== th && !it.bright }
+    val o = others[(k - 1) % others.size]
+    return SectionLook(o.light, o.hot, o.onLight)
+}
+
+/** The colour of each section, for the rail. */
+fun gridPartColors(s: KeyGrid.Settings): List<Color> = List(4) { if (Eink) Color.Black else sectionLook(s, it).light }
 
 /** The grid's play surface. */
 @Composable
@@ -207,7 +249,7 @@ fun KeyGridSurface() {
     }
     val s = KeyGrid.settings
     grid.settings = s
-    grid.center = (AppState.instrument(0)?.centerNote ?: 60f) + 12f * s.octave
+    for (k in 0 until 4) grid.centers[k] = (AppState.instrument(k)?.centerNote ?: 60f) + 12f * (s.octave + s.section(k).octave)
     LaunchedEffect(s.latch) { if (!s.latch) grid.releaseLatched() }
     val th = gridTheme(s)
     val left = KeyGrid.SIDE_CONTROLS.indices.filter { s.side(it) == KeyGrid.LEFT }
@@ -251,7 +293,8 @@ private fun GridCanvas(grid: Grid, modifier: Modifier, frame: () -> Int) {
  */
 private class Grid {
     var settings = KeyGrid.Settings()
-    var center = 60f
+    /** Each section's middle note: its instrument's middle, moved by the octaves. */
+    val centers = FloatArray(4) { 60f }
     private var w = 1f; private var h = 1f; private var density = 1f
 
     fun size(width: Float, height: Float, d: Float) { w = width; h = height; density = d }
@@ -268,19 +311,41 @@ private class Grid {
     private val left get() = (w - cell * settings.cols) / 2
     private val bottom get() = h - pad
 
-    private val mask get() = SCALES[settings.scale].mask.let { if (it == 0) 0xFFF else it }
-    private fun inScale(note: Int) = (mask shr (((note - settings.key) % 12 + 12) % 12)) and 1 == 1
-    private val degrees get() = (0 until 12).filter { (mask shr it) and 1 == 1 }
+    private fun mask(sec: KeyGrid.Section) = SCALES[sec.scale].mask.let { if (it == 0) 0xFFF else it }
+    private fun inScale(note: Int, sec: KeyGrid.Section) = (mask(sec) shr (((note - sec.key) % 12 + 12) % 12)) and 1 == 1
+    private fun degrees(sec: KeyGrid.Section) = (0 until 12).filter { (mask(sec) shr it) and 1 == 1 }
     private val count get() = rows * settings.cols
 
-    /** The note of square n. The grid starts on the key, so its middle sits near the middle of the instrument. */
-    private fun noteOf(n: Int): Int {
-        val step = if (settings.chromatic) 1 else degrees.size
-        val span = if (settings.chromatic) count else 12 * count / step
-        val base = settings.key + 12 * floor((center - span / 2f - settings.key) / 12f + 0.5f).toInt()
-        val k = n.coerceIn(0, count - 1)
-        return (if (settings.chromatic) base + k else base + 12 * (k / step) + degrees[k % step]).coerceIn(0, 127)
+    /** The section of square n, by its row. */
+    fun partOf(n: Int) = settings.sectionOf(n / settings.cols).coerceIn(0, settings.count - 1)
+
+    /**
+     * The note of square n in section [part]'s grid. Each section lays out the whole grid with its
+     * own notes, starting on its key, its middle near the middle of its instrument; it shows only
+     * its own rows of it. So moving a line shows more or less of a section, and changes no note.
+     */
+    private fun noteOf(n: Int, part: Int = partOf(n)): Int {
+        val sec = settings.section(part)
+        val degrees = degrees(sec)
+        val step = if (sec.chromatic) 1 else degrees.size
+        val span = if (sec.chromatic) count else 12 * count / step
+        val base = sec.key + 12 * floor((centers[part] - span / 2f - sec.key) / 12f + 0.5f).toInt()
+        // Slid: the rows show the notes further up (or down) the same endless grid.
+        val k = n + settings.scroll * settings.cols
+        return (if (sec.chromatic) base + k else base + 12 * Math.floorDiv(k, step) + degrees[Math.floorMod(k, step)]).coerceIn(0, 127)
     }
+
+    // ---- the lines between sections, and the tab at the right end of each to move it ----
+    private fun lineY(i: Int) = bottom - settings.splits[i] * cell
+    private val tabX get() = left + cell * settings.cols
+    /** The line whose tab is under (x, y), or -1. */
+    private fun tabAt(x: Float, y: Float): Int {
+        if (settings.count < 2 || abs(x - tabX) > 24f * density) return -1
+        return settings.splits.indices.filter { settings.splits[it] < rows }.minByOrNull { abs(y - lineY(it)) }
+            ?.takeIf { abs(y - lineY(it)) < 20f * density } ?: -1
+    }
+    /** Fingers moving a line: pointer to the line. */
+    private val dragging = HashMap<Long, Int>()
 
     /** The column a square of the row is drawn in: right-handed the notes climb right to left. */
     private val mirrored get() = !settings.leftHanded
@@ -294,7 +359,7 @@ private class Grid {
     }
     private fun squareOrigin(n: Int) = Offset(left + column(n % settings.cols) * cell, bottom - (n / settings.cols + 1) * cell)
 
-    private inner class Finger(val channel: Int, val n: Int, val note: Int, val x0: Float, val y0: Float) {
+    private inner class Finger(val channel: Int, val n: Int, val part: Int, val note: Int, val x0: Float, val y0: Float) {
         var x = x0; var y = y0
         var sx = x0; var sy = y0            // the finger's slow position: the axes follow it, vibrato is what is left
         var pressure = -1; var slide = -1; var bend = -1; var volume = -1
@@ -340,6 +405,7 @@ private class Grid {
     private val latching get() = settings.latch || holding
 
     fun down(id: Long, x: Float, y: Float) {
+        tabAt(x, y).takeIf { it >= 0 }?.let { dragging[id] = it; dirty = true; return }
         val n = squareAt(x, y) ?: return
         if (settings.latch && settings.latchMode == KeyGrid.LATCH_TAP) {
             // Tap a held square to let it go.
@@ -351,17 +417,26 @@ private class Grid {
         val ch = freeChannel() ?: return
         lastUsed[ch] = ++clock
         ringing.removeAll { it.channel == ch }
-        val f = Finger(ch, n, noteOf(n), x, y)
+        val part = partOf(n)
+        val f = Finger(ch, n, part, noteOf(n, part), x, y)
         fingers[id] = f
         val e = expression(f)
         f.volume = e.volume
         send(0xB0 or ch, 7, e.volume)
+        if (settings.count > 1) send(0xB0 or ch, 9, part + 1)       // this finger plays its section's sound
         send(0x90 or ch, f.note, (e.pressure / 5f).roundToInt().coerceIn(1, 127))
         sendExpression(f)
         dirty = true
     }
 
     fun move(id: Long, x: Float, y: Float) {
+        dragging[id]?.let { i ->
+            if (i < settings.splits.size) {
+                val r = ((bottom - y) / cell).roundToInt()
+                if (r != settings.splits[i]) KeyGrid.moveSplit(i, r)
+            }
+            dirty = true; return
+        }
         val f = fingers[id] ?: return
         f.x = x; f.y = y
         sendExpression(f)
@@ -369,6 +444,7 @@ private class Grid {
     }
 
     fun up(id: Long) {
+        if (dragging.remove(id) != null) return
         if (spent.remove(id)) return
         val f = fingers.remove(id) ?: return
         if (latching) {
@@ -387,7 +463,7 @@ private class Grid {
         lastUsed[f.channel] = ++clock
         val p = AppState.perf
         ringing += Ringing(f.channel, f.note, f.n, levelOf(f.channel, f.note).coerceAtLeast(1e-4f),
-                           p.part(0).reverb, 0.7f + p.reverbSize * 5.3f)
+                           p.part(f.part).reverb, 0.7f + p.reverbSize * 5.3f)
         dirty = true
     }
 
@@ -405,7 +481,7 @@ private class Grid {
     fun releaseAll() { for (id in fingers.keys.toList()) up(id); spent.clear(); holding = false; releaseLatched() }
 
     // ---- what the engine is playing ------------------------------------------------------------
-    private val voices = FloatArray(32 * 8)
+    private val voices = FloatArray(64 * 8)
     private var nVoices = 0
     /**
      * How loud the voice playing [note] on [channel] is now. Once its finger lifts the engine no
@@ -467,7 +543,7 @@ private class Grid {
                 KeyGrid.BEND -> {
                     // Right-handed the next note is to the left: dragging right goes down the scale.
                     val step = if (!across) settings.cols else if (mirrored) -1 else 1
-                    val to = noteOf(f.n + if (v >= 0) step else -step)
+                    val to = noteOf(f.n + if (v >= 0) step else -step, f.part)
                     val amount = ((abs(v) - 0.08f) / 0.92f).coerceIn(0f, 1f)
                     semis += (to - f.note) * amount
                 }
@@ -497,7 +573,8 @@ private class Grid {
         val flat = Eink
         val th = gridTheme(settings)
         drawRect(if (flat) Color.White else th.background)
-        val light = if (flat) Color.Black else th.light
+        if (KeyGrid.shownRows != rows) KeyGrid.shownRows = rows
+        val looks = List(settings.count) { sectionLook(settings, it) }
         val text = android.graphics.Paint().apply { isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER }
         val held = fingers.values.map { it.n }.toSet()
         val glowOf = FloatArray(count)
@@ -510,9 +587,13 @@ private class Grid {
         for (n in 0 until count) {
             val o = squareOrigin(n) + Offset(gap / 2, gap / 2)
             val sz = Size(side, side)
-            val note = noteOf(n)
-            val root = ((note - settings.key) % 12 + 12) % 12 == 0
-            val off = settings.chromatic && !inScale(note)
+            val part = partOf(n)
+            val sec = settings.section(part)
+            val look = looks[part]
+            val light = if (flat) Color.Black else look.light
+            val note = noteOf(n, part)
+            val root = ((note - sec.key) % 12 + 12) % 12 == 0
+            val off = sec.chromatic && !inScale(note, sec)
             val on = n in held
             val glow = if (on) 1f else glowOf[n]
             // The square itself, a shade apart from the background; a note outside the scale sinks into it.
@@ -526,7 +607,7 @@ private class Grid {
             // The outline: the root's fully lit, the scale's soft, a note outside the scale broken.
             val latchedHere = n in kept
             val edge = when {
-                on || glow > 0.6f || latchedHere -> if (flat) Color.Black else th.hot
+                on || glow > 0.6f || latchedHere -> if (flat) Color.Black else look.hot
                 root -> light
                 off -> light.copy(alpha = if (flat) 0.4f else 0.18f)
                 else -> light.copy(alpha = if (flat) 0.8f else 0.38f)
@@ -537,20 +618,33 @@ private class Grid {
             drawRoundRect(edge, o, sz, radius, style = Stroke(width = (if (root) 2.5f else 1.5f) * density,
                                                               pathEffect = if (off && glow == 0f) dash else null))
             // A latched square: a dot in its corner, as long as it is held.
-            if (latchedHere && !on) drawCircle(if (glow > 0.5f) (if (flat) Color.White else th.onLight) else (if (flat) Color.Black else th.hot),
+            if (latchedHere && !on) drawCircle(if (glow > 0.5f) (if (flat) Color.White else look.onLight) else (if (flat) Color.Black else look.hot),
                                                side * 0.06f, o + Offset(side * 0.84f, side * 0.16f))
             if (settings.labels) {
                 text.textSize = side * 0.16f
                 text.isFakeBoldText = root
-                text.color = (if (glow > 0.5f) (if (flat) Color.White else th.onLight) else light.copy(alpha = if (off) 0.4f else 0.75f)).toArgb()
+                text.color = (if (glow > 0.5f) (if (flat) Color.White else look.onLight) else light.copy(alpha = if (off) 0.4f else 0.75f)).toArgb()
                 val name = NOTE_NAMES[note % 12] + if (root) "${note / 12 - 1}" else ""
                 drawContext.canvas.nativeCanvas.drawText(name, o.x + side / 2, o.y + side / 2 + text.textSize * 0.35f, text)
             }
         }
+        // The lines between sections, in the colour of the one above, each with its tab at the right end.
+        for (i in settings.splits.indices) {
+            if (settings.splits[i] >= rows) continue
+            val y = lineY(i)
+            val col = if (flat) Color.Black else looks[(i + 1).coerceAtMost(looks.size - 1)].light
+            drawLine(col.copy(alpha = 0.8f), Offset(left - 4f * density, y), Offset(tabX, y), 2f * density)
+            val dragged = i in dragging.values
+            drawRoundRect(col.copy(alpha = if (dragged) 1f else 0.85f), Offset(tabX - 6f * density, y - 9f * density),
+                          Size(16f * density, 18f * density), CornerRadius(5f * density))
+            for (k in -1..1) drawLine(if (flat) Color.White else th.background, Offset(tabX - 1f * density, y + k * 4f * density),
+                                      Offset(tabX + 6f * density, y + k * 4f * density), 1.2f * density)
+        }
         // A halo that follows each finger.
         if (!flat && !th.bright) for (f in fingers.values) {
+            val look = looks[f.part.coerceIn(0, looks.size - 1)]
             val r = cell * 0.9f
-            drawCircle(Brush.radialGradient(listOf(th.hot.copy(alpha = 0.5f), light.copy(alpha = 0.22f), light.copy(alpha = 0f)),
+            drawCircle(Brush.radialGradient(listOf(look.hot.copy(alpha = 0.5f), look.light.copy(alpha = 0.22f), look.light.copy(alpha = 0f)),
                                             center = Offset(f.x, f.y), radius = r), r, Offset(f.x, f.y))
         }
     }
@@ -575,12 +669,24 @@ private fun SideStrip(controls: List<Int>, grid: Grid, th: GridTheme, turn: Floa
                 SideButton("Hold", if (down) "holding" else "press", down, th, ink, turn,
                            onPress = { v -> down = v; grid.hold(v) })
             }
-            KeyGrid.S_ARP -> SideButton("Arp", if (s.arp.on) ARP_ORDERS[s.arp.order] else "off", s.arp.on, th, ink, turn,
-                                        onTap = { KeyGrid.update { it.copy(arp = it.arp.copy(on = !it.arp.on)) } })
-            KeyGrid.S_OCTAVE -> SideSlider("Oct", if (s.octave == 0) "0" else "%+d".format(s.octave),
-                                           (s.octave + 3) / 6f, th, ink, turn, ticks = 7, centre = false,
-                                           drag = { _, at -> val o = (at * 6).roundToInt() - 3
-                                                             if (o != KeyGrid.settings.octave) KeyGrid.update { it.copy(octave = o) } })
+            KeyGrid.S_ARP -> {
+                // The arp of the section the rail is on.
+                val k = AppState.part.coerceIn(0, s.count - 1)
+                val a = s.section(k).arp
+                SideButton("Arp", if (a.on) ARP_ORDERS[a.order] else "off", a.on, th, ink, turn,
+                           onTap = { KeyGrid.update { st -> st.withSection(k) { it.copy(arp = it.arp.copy(on = !it.arp.on)) } } })
+            }
+            KeyGrid.S_SCROLL -> {
+                // Drag up and the rows slide down, bringing higher notes in: a row for every 1/8 of the strip.
+                var start by remember { mutableIntStateOf(0) }
+                val r = KeyGrid.SCROLL
+                SideSlider("Scroll", if (s.scroll == 0) "0" else "%+d".format(s.scroll),
+                           (s.scroll - r.first) / (r.last - r.first).toFloat(), th, ink, turn, ticks = 5, centre = true,
+                           drag = { from, at ->
+                               if (from == at) start = KeyGrid.settings.scroll
+                               val v = (start + ((at - from) * 8).roundToInt()).coerceIn(r)
+                               if (v != KeyGrid.settings.scroll) KeyGrid.update { it.copy(scroll = v) } })
+            }
             KeyGrid.S_BEND -> {
                 var shown by remember { mutableFloatStateOf(0f) }
                 SideSlider("Bend", if (shown == 0f) "0" else "%+.1f".format(shown), 0.5f + shown / 4f, th, ink, turn, ticks = 5, centre = true,

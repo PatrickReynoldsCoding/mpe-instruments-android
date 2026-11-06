@@ -5,8 +5,8 @@
 using namespace mpe;
 
 static std::vector<VoiceView> voicesOf(Rig& r) {
-    VoiceView v[32];
-    int n = r.engine.voices(v, 32);
+    VoiceView v[kParts * 16];
+    int n = r.engine.voices(v, kParts * 16);
     return std::vector<VoiceView>(v, v + n);
 }
 
@@ -94,6 +94,32 @@ int main() {
         r.noteOn(1, 48, 80);                                // the choice ended with the note
         r.run(0.2);
         CHECK(gated(r, 0, 48) == 1 && gated(r, 1, 48) == 0, "split CC 9: the next note on that channel goes by note again");
+    }
+
+    // ---- four sections (the grid): CC 9 picks any of the four parts, each its own sound ----
+    {
+        Rig r("strings/cello");
+        r.engine.setInstrument(1, findInstrument("winds/flute"));
+        r.engine.setInstrument(2, findInstrument("plucked/nylon-guitar"));
+        r.engine.setInstrument(3, findInstrument("synths/fm-keys"));
+        Performance p;
+        p.layout = Layout::Split;
+        p.part[3].reverb = 0.5f;
+        r.engine.setPerformance(p);
+        r.run(0.01);
+        for (int k = 0; k < kParts; k++) { r.send(0xB0 | (k + 1), 9, k + 1); r.noteOn(k + 1, 50 + k * 5, 80); }
+        auto x = r.run(0.3);
+        bool each = true;
+        for (int k = 0; k < kParts; k++)
+            for (int q = 0; q < kParts; q++) each = each && gated(r, q, 50 + k * 5) == (q == k ? 1 : 0);
+        CHECK(each, "four parts: each finger plays only the part its CC 9 names");
+        CHECK(finite(x) && rms(x, kSr / 10, x.size()) > 0.005, "four parts: audible (rms %.3f)", rms(x, kSr / 10, x.size()));
+        Performance single;
+        r.engine.setPerformance(single);
+        for (int k = 0; k < kParts; k++) r.noteOff(k + 1, 50 + k * 5);
+        r.run(0.05);
+        r.noteOn(5, 62, 80); r.run(0.1);
+        CHECK(gated(r, 0, 62) == 1 && gated(r, 2, 62) == 0 && gated(r, 3, 62) == 0, "four parts: alone again, only part 0 plays");
     }
 
     // ---- layer: every finger plays both parts ----

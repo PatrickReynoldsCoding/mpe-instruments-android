@@ -61,6 +61,7 @@ data class Part(
  */
 data class EngineShape(
     val split: Boolean = false,
+    val parts: Int = 2,            // split: how many parts (sounds) it divides between, 2..PARTS
     val arps: List<Arp> = listOf(Arp(), Arp()),
     val scale: Int = 0,            // pitch assist: index into SCALES; 0 = off
     val scaleRoot: Int = 0,
@@ -69,6 +70,9 @@ data class EngineShape(
     val bendRange: Float = 48f,
     val splitNote: Int = 60,       // a split's divide for notes that do not say their part
 )
+
+/** The most sounds at once: a split's sections, each its own part (mpe::kParts). */
+const val PARTS = 4
 
 /** The sound, which every controller plays: the parts, a second one layered or not, tempo and effects. */
 data class Perf(
@@ -79,26 +83,29 @@ data class Perf(
     val delayBeats: Float = 0.75f,
     val delayFeedback: Float = 0.35f,
     val delayPingPong: Boolean = true,
-    val parts: List<Part> = listOf(Part(), Part(instrument = "voices/soprano")),
+    val parts: List<Part> = DEFAULT_PARTS,
 ) {
-    fun part(i: Int) = parts[i]
-    fun withPart(i: Int, f: (Part) -> Part) = copy(parts = parts.mapIndexed { k, p -> if (k == i) f(p) else p })
+    /** Part [i]; a perf made with fewer (most presets give two) has the defaults for the rest. */
+    fun part(i: Int) = parts.getOrElse(i) { DEFAULT_PARTS[i] }
+    fun withPart(i: Int, f: (Part) -> Part) = copy(parts = List(PARTS) { k -> if (k == i) f(part(k)) else part(k) })
 
     /** The engine's layout: 0 one part, 1 split, 2 layered. */
     fun layout(shape: EngineShape) = if (shape.split) 1 else if (layered) 2 else 0
+    /** How many parts sound: one, a split's, or two layered. */
+    fun partCount(shape: EngineShape) = when (layout(shape)) { 1 -> shape.parts.coerceIn(2, PARTS); 2 -> 2; else -> 1 }
 
     /** The layout nativeSetPerformance (jni.cpp) reads. Keep the two in step. */
     fun toArray(shape: EngineShape): FloatArray {
-        val a = FloatArray(11 + 2 * 14)
+        val a = FloatArray(11 + PARTS * 14)
         val layout = layout(shape)
         a[0] = layout.toFloat(); a[1] = shape.splitNote.toFloat(); a[2] = bpm
         a[3] = SCALES[shape.scale.coerceIn(SCALES.indices)].mask.toFloat(); a[4] = shape.scaleRoot.toFloat()
         a[5] = if (shape.scale == 0) 0f else shape.assist
         a[6] = reverbSize; a[7] = reverbDamp; a[8] = delayBeats; a[9] = delayFeedback; a[10] = if (delayPingPong) 1f else 0f
-        for (k in 0..1) {
-            val p = parts[k]
+        for (k in 0 until PARTS) {
+            val p = part(k)
             // Layered on one pad: both parts arpeggiate as the pad does.
-            val r = if (layout == 2) shape.arps[0] else shape.arps[k]
+            val r = if (layout == 2) shape.arps[0] else shape.arps.getOrElse(k) { Arp() }
             val b = 11 + 14 * k
             a[b] = if (r.on) 1f else 0f; a[b + 1] = r.order.toFloat(); a[b + 2] = r.rate; a[b + 3] = r.gate
             a[b + 4] = r.octaves.toFloat(); a[b + 5] = if (r.latch) 1f else 0f; a[b + 6] = p.transpose.toFloat()
@@ -112,10 +119,13 @@ data class Perf(
         put("layered", layered); put("bpm", bpm.toDouble()); put("reverbSize", reverbSize.toDouble())
         put("reverbDamp", reverbDamp.toDouble()); put("delayBeats", delayBeats.toDouble())
         put("delayFeedback", delayFeedback.toDouble()); put("delayPingPong", delayPingPong)
-        put("part0", parts[0].json()); put("part1", parts[1].json())
+        for (k in 0 until PARTS) put("part$k", part(k).json())
     }
 
     companion object {
+        /** The sounds a part starts with: the main one, the layer (or right of a split), then a grid's third and fourth sections. */
+        val DEFAULT_PARTS = listOf(Part(), Part(instrument = "voices/soprano"), Part(instrument = "plucked/bass-guitar"),
+                                   Part(instrument = "keys/rhodes"))
         fun from(o: JSONObject?): Perf {
             val d = Perf()
             if (o == null) return d
@@ -126,7 +136,7 @@ data class Perf(
                 o.optDouble("reverbSize", d.reverbSize.toDouble()).toFloat(), o.optDouble("reverbDamp", d.reverbDamp.toDouble()).toFloat(),
                 o.optDouble("delayBeats", d.delayBeats.toDouble()).toFloat(), o.optDouble("delayFeedback", d.delayFeedback.toDouble()).toFloat(),
                 o.optBoolean("delayPingPong", d.delayPingPong),
-                listOf(Part.from(o.optJSONObject("part0"), d.parts[0]), Part.from(o.optJSONObject("part1"), d.parts[1])))
+                List(PARTS) { k -> Part.from(o.optJSONObject("part$k"), d.parts[k]) })
         }
     }
 }

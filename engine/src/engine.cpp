@@ -120,7 +120,7 @@ struct Engine::Fx {
     std::vector<float> dl, dr;                 // delay lines
     int pos = 0;
     float time = -1, lpL = 0, lpR = 0;         // delay time in frames (smoothed), feedback low-pass
-    float tone[2][4] = {};                     // per part: two one-pole stages, left and right
+    float tone[kParts][4] = {};                     // per part: two one-pole stages, left and right
     explicit Fx(int sr) : dl(size_t(sr) * 5 / 2), dr(size_t(sr) * 5 / 2) {
         reverb = mpe_create_fx_reverb();
         reverb->init(sr);
@@ -132,8 +132,8 @@ struct Engine::Fx {
 };
 
 Engine::Engine(int sampleRate)
-    : sr_(sampleRate), ch_(new Channel[kChannels]), parts_(new Part[2]), fx_(new Fx(sampleRate)),
-      pubVoices_(new PubVoice[2 * kChannels]), pubFingers_(new PubFinger[kChannels]) {
+    : sr_(sampleRate), ch_(new Channel[kChannels]), parts_(new Part[kParts]), fx_(new Fx(sampleRate)),
+      pubVoices_(new PubVoice[kParts * kChannels]), pubFingers_(new PubFinger[kChannels]) {
     for (auto& lp : loops_) lp.reset(new Looper(sampleRate));
     // A 150 Hz low-pass (2nd order), the same band the breath detector listens to.
     const float w0 = 2.f * float(M_PI) * 150.f / sr_, cw = std::cos(w0), al = std::sin(w0) / (2.f * 0.7071f), a0 = 1.f + al;
@@ -143,7 +143,7 @@ Engine::Engine(int sampleRate)
 }
 
 Engine::~Engine() {
-    for (int p = 0; p < 2; p++) { delete parts_[p].set; delete pending_[p].exchange(nullptr); }
+    for (int p = 0; p < kParts; p++) { delete parts_[p].set; delete pending_[p].exchange(nullptr); }
     delete pendingPerf_.exchange(nullptr);
     collectRetired();
 }
@@ -158,7 +158,7 @@ bool Engine::pushMidi(const Msg& m) {
 bool Engine::setInstrument(int part, int index) {
     int n = 0;
     const InstrumentInfo* all = instruments(n);
-    if (part < 0 || part > 1 || index < 0 || index >= n) return false;
+    if (part < 0 || part >= kParts || index < 0 || index >= n) return false;
     InstrumentSet* fresh = new InstrumentSet(index, all[index], sr_);
     delete pending_[part].exchange(fresh);  // a still-unclaimed older request is replaced
     current_[part] = index;
@@ -194,7 +194,7 @@ void Engine::apply(const Msg& m) {
             c.order = ++pressCounter_;
             c.parts = perf_.layout == Layout::Layer ? 3
                     : perf_.layout != Layout::Split ? 1
-                    : c.force == 1 || c.force == 2 ? c.force          // a split screen pad: its side's part
+                    : c.force >= 1 && c.force <= kParts ? 1 << (c.force - 1)   // a split screen: its section's part
                     : (m.d1 < perf_.splitNote ? 1 : 2);
             recentNotes_[recentPos_] = m.d1;
             recentPos_ = (recentPos_ + 1) % 16;
@@ -242,7 +242,7 @@ void Engine::releasePart(int p) {
 
 // Instruments and settings from the control thread, picked up between blocks.
 void Engine::takeUpdates() {
-    for (int p = 0; p < 2; p++) {
+    for (int p = 0; p < kParts; p++) {
         if (InstrumentSet* fresh = pending_[p].exchange(nullptr)) {
             Part& P = parts_[p];
             if (P.set && !retired_.push(P.set)) delete P.set;    // (only if the control side never collects)
@@ -256,7 +256,7 @@ void Engine::takeUpdates() {
         }
     }
     if (Performance* np = pendingPerf_.exchange(nullptr)) {
-        for (int p = 0; p < 2; p++)
+        for (int p = 0; p < kParts; p++)
             if (np->part[p].arp != parts_[p].arp) { releasePart(p); parts_[p].arp = np->part[p].arp; }
         perf_ = *np;
         if (!retiredPerf_.push(np)) delete np;
@@ -669,7 +669,7 @@ void Engine::masterFx(float* mixL, float* mixR, const float* revL, const float* 
     }
 
     bool send = false;
-    for (int p = 0; p < 2; p++) send = send || perf_.part[p].reverb + gyroReverb_ > 0;
+    for (int p = 0; p < kParts; p++) send = send || perf_.part[p].reverb + gyroReverb_ > 0;
     if (!send && fx.reverbQuiet > 8 * sr_) return;                           // off, and its tail has died away
     if (fx.size) *fx.size = perf_.reverbSize;
     if (fx.damp) *fx.damp = perf_.reverbDamp;
@@ -683,7 +683,7 @@ void Engine::masterFx(float* mixL, float* mixR, const float* revL, const float* 
 }
 
 void Engine::publish() {
-    for (int p = 0; p < 2; p++)
+    for (int p = 0; p < kParts; p++)
         for (int i = 1; i < kChannels; i++) {
             const Voice& v = parts_[p].v[i];
             PubVoice& o = pubVoices_[p * kChannels + i];
@@ -710,7 +710,7 @@ void Engine::publish() {
 
 int Engine::voices(VoiceView* out, int max) const {
     int n = 0;
-    for (int p = 0; p < 2; p++)
+    for (int p = 0; p < kParts; p++)
         for (int i = 1; i < kChannels && n < max; i++) {
             const PubVoice& o = pubVoices_[p * kChannels + i];
             if (!o.on.load(std::memory_order_relaxed)) continue;
@@ -770,7 +770,7 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
     }
     if (doPanic) {
         for (int ch = 0; ch < kChannels; ch++) { ch_[ch].note = -1; ch_[ch].pressure = 0; ch_[ch].bend = 0; ch_[ch].volume = 1; ch_[ch].force = 0; }
-        for (int p = 0; p < 2; p++) { releasePart(p); parts_[p].latchCount = 0; }   // a latched arp stops too
+        for (int p = 0; p < kParts; p++) { releasePart(p); parts_[p].latchCount = 0; }   // a latched arp stops too
         panics_++;
     }
 
@@ -784,7 +784,7 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
         const int64_t now = frameCounter_ + done;
         // Arp clock: steps and note ends land on the exact frame; blocks are cut there.
         int64_t next = now + std::min(kMaxBlock, frames - done);
-        for (int p = 0; p < 2; p++) {
+        for (int p = 0; p < kParts; p++) {
             Part& P = parts_[p];
             if (!P.arp || !P.set) continue;
             bool held = false;
@@ -810,10 +810,11 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
         std::fill(revR, revR + n, 0.f);
         std::fill(delL, delL + n, 0.f);
         std::fill(delR, delR + n, 0.f);
-        for (int p = 0; p < 2; p++) {
-            if (p == 1 && perf_.layout == Layout::Single) {          // part 1 off: let its notes ring out
+        for (int p = 0; p < kParts; p++) {
+            // A part not in use (only the first plays alone, the first two layered): let its notes ring out.
+            if ((p >= 1 && perf_.layout == Layout::Single) || (p >= 2 && perf_.layout == Layout::Layer)) {
                 bool any = false;
-                for (int i = 1; i < kChannels; i++) any = any || parts_[1].v[i].sounding;
+                for (int i = 1; i < kChannels; i++) any = any || parts_[p].v[i].sounding;
                 if (!any) continue;
             }
             std::fill(partL, partL + n, 0.f);
@@ -863,7 +864,7 @@ void Engine::render(float* out, int frames, int64_t nowNs) {
         done += n;
     }
     int voices = 0;
-    for (int p = 0; p < 2; p++) for (int i = 1; i < kChannels; i++) voices += parts_[p].v[i].sounding;
+    for (int p = 0; p < kParts; p++) for (int i = 1; i < kChannels; i++) voices += parts_[p].v[i].sounding;
     activeVoices_ = voices;
     frameCounter_ += frames;
     if (!std::isfinite(lowEnv_)) { lowEnv_ = 0; for (float& z : lowZ_) z = 0; }

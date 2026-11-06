@@ -35,10 +35,10 @@ FN(void, nativeSetPartInstrument)(JNIEnv*, jobject, jint part, jint i) { synth()
 
 // The whole Performance as one float array. Layout must match Perf.toArray() in Perf.kt.
 FN(void, nativeSetPerformance)(JNIEnv* env, jobject, jfloatArray arr) {
-    constexpr int kHead = 11, kPart = 14;
-    if (env->GetArrayLength(arr) < kHead + 2 * kPart) return;
-    float a[kHead + 2 * kPart];
-    env->GetFloatArrayRegion(arr, 0, kHead + 2 * kPart, a);
+    constexpr int kHead = 11, kPart = 14, kLen = kHead + mpe::kParts * kPart;
+    if (env->GetArrayLength(arr) < kLen) return;
+    float a[kLen];
+    env->GetFloatArrayRegion(arr, 0, kLen, a);
     mpe::Performance p;
     p.layout = mpe::Layout(int(a[0]));
     p.splitNote = int(a[1]);
@@ -51,7 +51,7 @@ FN(void, nativeSetPerformance)(JNIEnv* env, jobject, jfloatArray arr) {
     p.delayBeats = a[8];
     p.delayFeedback = a[9];
     p.delayPingPong = a[10] > 0.5f;
-    for (int k = 0; k < 2; k++) {
+    for (int k = 0; k < mpe::kParts; k++) {
         const float* b = a + kHead + k * kPart;
         mpe::PartConfig& c = p.part[k];
         c.arp = b[0] > 0.5f;
@@ -74,9 +74,10 @@ FN(void, nativeSetPerformance)(JNIEnv* env, jobject, jfloatArray arr) {
 
 // Sounding voices into `out`, 8 floats each: part, finger, note, gate, pitch, pressure, slide, level.
 FN(jint, nativeVoices)(JNIEnv* env, jobject, jfloatArray out) {
-    mpe::VoiceView v[32];
-    const int n = std::min(synth().voices(v, 32), int(env->GetArrayLength(out) / 8));
-    float a[32 * 8];
+    constexpr int kMax = mpe::kParts * 16;
+    mpe::VoiceView v[kMax];
+    const int n = std::min(synth().voices(v, kMax), int(env->GetArrayLength(out) / 8));
+    float a[kMax * 8];
     for (int i = 0; i < n; i++) {
         float* o = a + 8 * i;
         o[0] = v[i].part; o[1] = v[i].finger; o[2] = v[i].note; o[3] = v[i].gate;

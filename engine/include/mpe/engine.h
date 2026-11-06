@@ -55,11 +55,15 @@ struct PartConfig {
                                // over this long (0 = the instrument's own ending)
 };
 
+// The sounds that can play at once: a split can give each section its own (the grid, up to four).
+constexpr int kParts = 4;
+
 struct Performance {
     Layout layout = Layout::Single;
-    int splitNote = 60;        // Split: notes below go to part 0 (left), the rest to part 1
+    int splitNote = 60;        // Split: notes below go to part 0 (left), the rest to part 1, unless the
+                               // finger says its part (CC 9 = part + 1, before its note on)
     float bpm = 120;
-    PartConfig part[2];
+    PartConfig part[kParts];
     // Pitch assist: a finger that rests is pulled to the nearest note of the scale.
     uint16_t scaleMask = 0;    // bit n: (root + n) % 12 is in the scale; 0 = off
     int scaleRoot = 0;         // 0 = C
@@ -225,9 +229,9 @@ private:
     std::unique_ptr<Fx> fx_;
     std::unique_ptr<Looper> loops_[kLoops];
     bool noteStarted_ = false;                      // a note started since the looper last looked
-    std::atomic<InstrumentSet*> pending_[2] = {};
+    std::atomic<InstrumentSet*> pending_[kParts] = {};
     Spsc<InstrumentSet*> retired_{8};
-    std::atomic<int> current_[2] = {{-1}, {-1}};
+    std::atomic<int> current_[kParts] = {{-1}, {-1}, {-1}, {-1}};
     Performance perf_;                              // audio thread's copy
     std::atomic<Performance*> pendingPerf_{nullptr};
     Spsc<Performance*> retiredPerf_{8};
@@ -255,7 +259,7 @@ private:
     float gyroZero_[3] = {}, gyroHp1_[3] = {}, gyroHp2_[3] = {}, gyroPrev_[3] = {};   // degrees
     float shakePhase_ = 0;
     int lastOn_[16] = {}; float lastSemi_[16] = {};  // per finger: the note and semitone the bend reset last saw
-    float modBend_ = 0, modSlide_ = 0, breath_ = 0, gain_[2] = {1, 1}, toneOpen_ = 1;
+    float modBend_ = 0, modSlide_ = 0, breath_ = 0, gain_[kParts] = {1, 1, 1, 1}, toneOpen_ = 1;
     float gyroGain_ = 1, gyroBright_ = 1, gyroRelease_ = 0, gyroReverb_ = 0, gyroDelay_ = 0;
     BreathMode breathNow_ = BreathMode::Off;
     std::atomic<float> pubTilt_{0}, pubBend_{0}, pubSlide_{0}, pubBreath_{0};
@@ -273,7 +277,7 @@ private:
     struct PubVoice { std::atomic<int> finger{-1}, note{-1}; std::atomic<bool> gate{false}, on{false};
                       std::atomic<float> pitch{0}, pressure{0}, slide{0}, level{0}; };
     struct PubFinger { std::atomic<int> note{-1}; std::atomic<float> pitch{0}, pressure{0}, slide{0}; };
-    std::unique_ptr<PubVoice[]> pubVoices_;         // 2 * 16
+    std::unique_ptr<PubVoice[]> pubVoices_;         // kParts * 16
     std::unique_ptr<PubFinger[]> pubFingers_;       // 16
 };
 
