@@ -373,11 +373,14 @@ object AppState {
     private fun save() { saver.removeCallbacks(saveNow); saver.postDelayed(saveNow, 400) }
 }
 
-private fun preset(name: String, perf: Perf) = Preset(name, perf, builtIn = true)
+private fun preset(name: String, perf: Perf, pad: PadLayout? = null) = Preset(name, perf, builtIn = true, pad = pad)
 private fun two(a: Part, b: Part = Part(instrument = "voices/soprano")) = listOf(a, b)
 
 /** A starting point for each kind of playing. */
 val BUILT_IN_PRESETS = listOf(
+    // Snapped keys, no finger vibrato (a piano cannot bend); press firmly as you lift to hold a note.
+    preset("Grand piano", Perf(reverbSize = 0.65f, parts = two(Part("keys/piano", reverb = 0.22f))),
+           PadLayout(listOf(PadSettings(size = 12, glide = 0f, vibrato = 0), PadSettings()), 0.5f)),
     preset("Solo cello", Perf(parts = two(Part("strings/cello", reverb = 0.25f)), reverbSize = 0.6f)),
     preset("Solo violin", Perf(parts = two(Part("strings/violin", reverb = 0.25f)))),
     preset("Breathy flute", Perf(parts = two(Part("winds/flute", reverb = 0.35f, pressureCurve = 0.7f)), reverbSize = 0.75f)),
