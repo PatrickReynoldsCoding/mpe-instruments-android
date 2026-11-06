@@ -19,6 +19,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -105,6 +107,63 @@ struct App {
 
     int sound = 0, controller = 0;
     std::vector<double> settings;       // the controller's, by position
+
+    // Remembered between sessions (~/.config/odo/settings.json): each controller's settings by
+    // name, the controller and sound in use, the rail and full screen.
+    std::string configPath = home() + "/.config/odo/settings.json";
+    bool persist = true;
+    std::map<std::string, std::map<std::string, double>> saved;
+    std::string savedController, savedSound;
+    bool savedFullscreen = false;
+
+    void loadConfig() {
+        std::ifstream f(configPath);
+        if (!f) return;
+        std::stringstream ss;
+        ss << f.rdbuf();
+        mpe::Json j = mpe::Json::parse(ss.str());
+        if (j.type != mpe::Json::Object) return;
+        savedController = j["controller"].str();
+        savedSound = j["sound"].str();
+        railHidden = j["railHidden"].boolean();
+        savedFullscreen = j["fullscreen"].boolean();
+        const mpe::Json& c = j["controllers"];
+        for (const auto& kv : c.o)
+            for (const auto& sv : kv.second.o) saved[kv.first][sv.first] = sv.second.num();
+    }
+
+    static std::string quoted(const std::string& v) {
+        std::string o = "\"";
+        for (char ch : v) { if (ch == '"' || ch == '\\') o += '\\'; o += ch; }
+        return o + "\"";
+    }
+
+    void saveConfig() {
+        if (!persist) return;
+        std::error_code ec;
+        fs::create_directories(fs::path(configPath).parent_path(), ec);
+        std::ofstream f(configPath + ".tmp");
+        f << "{\n  \"controller\": " << quoted(lib.controllers.empty() ? "" : lib.controllers[size_t(controller)]->id())
+          << ",\n  \"sound\": " << quoted(lib.instruments.empty() ? "" : lib.instruments[size_t(sound)].pkg->id())
+          << ",\n  \"railHidden\": " << (railHidden ? "true" : "false")
+          << ",\n  \"fullscreen\": " << ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? "true" : "false")
+          << ",\n  \"controllers\": {";
+        bool first = true;
+        for (const auto& kv : saved) {
+            f << (first ? "\n    " : ",\n    ") << quoted(kv.first) << ": {";
+            bool f2 = true;
+            for (const auto& sv : kv.second) { f << (f2 ? "" : ", ") << quoted(sv.first) << ": " << sv.second; f2 = false; }
+            f << "}";
+            first = false;
+        }
+        f << "\n  }\n}\n";
+        f.close();
+        fs::rename(configPath + ".tmp", configPath, ec);
+    }
+
+    void setRailHidden(bool on) { railHidden = on; surfaceW = 0; saveConfig(); }
+    void setFullscreen(bool on) { SDL_SetWindowFullscreen(window, on); saveConfig(); }
+    bool fullscreen() const { return (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0; }
     bool railHidden = false, eink = false, logMidi = false;
     float surfaceW = 0, surfaceH = 0;
 
@@ -172,6 +231,7 @@ struct App {
         engine->setInstrument(0, lib.instruments[size_t(k)].index);
         if (host) host->instrument(0, centerNote(*lib.instruments[size_t(k)].pkg));
         status.clear();
+        saveConfig();
     }
 
     void chooseSound(int k) {
@@ -220,9 +280,16 @@ struct App {
         std::string err;
         if (!host->load(*lib.controllers[size_t(k)], &err)) { status = err; host.reset(); return; }
         settings.clear();
+        settingsScroll = 0;
         const mpe::Json& s = host->manifest()["settings"];
-        for (size_t i = 0; i < s.size(); i++) settings.push_back(s[i]["default"].num());
+        const auto& mine = saved[lib.controllers[size_t(k)]->id()];
+        for (size_t i = 0; i < s.size(); i++) {
+            auto it = mine.find(s[i]["id"].str());
+            settings.push_back(it != mine.end() ? it->second : s[i]["default"].num());
+            if (it != mine.end()) host->setting(int(i), it->second);
+        }
         surfaceW = surfaceH = 0;                     // init() at the next frame, with the surface's size
+        saveConfig();
         if (!lib.instruments.empty() && lib.instruments[size_t(sound)].index >= 0)
             host->instrument(0, centerNote(*lib.instruments[size_t(sound)].pkg));
     }
@@ -241,6 +308,8 @@ struct App {
         }
         settings[i] = v;
         host->setting(int(i), v);
+        saved[lib.controllers[size_t(controller)]->id()][s["id"].str()] = v;
+        saveConfig();
     }
 
     std::string settingValue(size_t i) const {
@@ -268,7 +337,13 @@ struct App {
             return;
         }
         int row = int(y / kRow);
-        int dir = x < kRail / 2 ? -1 : 1;
+        if (row == 0) {                                  // the top row's buttons: full screen, hide
+            if (x >= kRail - kButton) setRailHidden(true);
+            else if (x >= kRail - 2 * kButton) setFullscreen(!fullscreen());
+            return;
+        }
+        // "<" goes back, ">" on, the rest of the row on (a switch flips).
+        int dir = x >= kRail - 2 * kButton && x < kRail - kButton ? -1 : 1;
         if (row == 1) chooseController(controller + dir);
         else if (row == 2) chooseSound(sound + dir);
         else if (host && y >= kSettingsTop && y < float(wh) - kBottom) {
@@ -280,6 +355,7 @@ struct App {
     // A finger (or the mouse) on the rail: a tap acts when it lifts; a drag scrolls the settings.
     // phase 0 down, 1 move, 2 up. True if the rail took it.
     static constexpr SDL_FingerID kMouseFinger = SDL_FingerID(-1);
+    static constexpr float kButton = 40;           // the arrows' and the top buttons' width
     struct Press { bool on = false; SDL_FingerID id = 0; float x = 0, y0 = 0, last = 0; bool dragged = false; } press;
     float settingsScroll = 0;
 
@@ -292,13 +368,15 @@ struct App {
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
         if (phase == 0) {
+            // Hidden, the rail's corner button brings it back.
+            if (railHidden && x < 44 && y < 44) { setRailHidden(false); press = Press{true, id, -1, -1, -1, true}; return true; }
             if (x >= railW() || press.on) return x < railW();
             press = Press{true, id, x, y, y, false};
             return true;
         }
         if (!press.on || press.id != id) return false;
         if (phase == 1) {
-            if (std::fabs(y - press.y0) > 10) press.dragged = true;
+            if (std::fabs(y - press.y0) > 16) press.dragged = true;
             if (press.dragged) scrollSettings(press.last - y, float(wh));
             press.last = y;
             return true;
@@ -374,8 +452,8 @@ struct App {
                 return;
             }
             case SDL_EVENT_KEY_DOWN:
-                if (e.key.key == SDLK_TAB) { railHidden = !railHidden; surfaceW = 0; }
-                else if (e.key.key == SDLK_F11) SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
+                if (e.key.key == SDLK_TAB) setRailHidden(!railHidden);
+                else if (e.key.key == SDLK_F11) setFullscreen(!fullscreen());
                 else if (e.key.key == SDLK_RIGHT) chooseSound(sound + 1);
                 else if (e.key.key == SDLK_LEFT) chooseSound(sound - 1);
                 return;
@@ -388,20 +466,35 @@ struct App {
     void drawRail(float h) {
         draw::Color bg = rgba(0x07080BFF), text = rgba(0xFFFFFFD9), dim = rgba(0x9AA2B4FF), accent = rgba(0xFF8A65FF);
         draw::fillRect(renderer, 0, 0, kRail, h, bg);
-        auto row = [&](int k, const std::string& label, const std::string& value, bool arrows) {
+        draw::Color key = rgba(0x1A1D26FF);
+        // The arrows: two buttons at the right of a row.
+        auto arrows = [&](float y, float h) {
+            draw::fillRect(renderer, kRail - 2 * kButton + 2, y + 3, kButton - 4, h - 6, key, 6);
+            draw::fillRect(renderer, kRail - kButton + 2, y + 3, kButton - 4, h - 6, key, 6);
+            float size = h >= 40 ? 14 : 11;
+            draw::text(renderer, kRail - 1.5f * kButton, y + h / 2 + size / 2, size, text, "<", 1);
+            draw::text(renderer, kRail - 0.5f * kButton, y + h / 2 + size / 2, size, text, ">", 1);
+        };
+        // A value cut to fit before the arrows.
+        auto fit = [&](const std::string& v, float size) {
+            size_t room = size_t((kRail - 2 * kButton - 16) / size);
+            return draw::textWidth(size, v) <= kRail - 2 * kButton - 16 ? v : v.substr(0, room > 2 ? room - 2 : room) + "..";
+        };
+        auto row = [&](int k, const std::string& label, const std::string& value) {
             float y = float(k) * kRow;
             draw::text(renderer, 12, y + 19, 11, dim, label);
-            draw::text(renderer, 12, y + 37, 13, text, value);
-            if (arrows) {
-                draw::text(renderer, kRail - 34, y + 34, 13, dim, "<");
-                draw::text(renderer, kRail - 16, y + 34, 13, dim, ">");
-            }
+            draw::text(renderer, 12, y + 37, 13, text, fit(value, 13));
+            arrows(y, kRow);
         };
         draw::text(renderer, 12, 30, 18, accent, "odo", 0, true);
-        draw::text(renderer, 64, 30, 10, dim, "a MESH");
-        row(1, "Controller", host ? lib.controllers[size_t(controller)]->name() : "none", true);
+        // The top row's buttons: full screen, and hide the rail.
+        draw::fillRect(renderer, kRail - 2 * kButton + 2, 5, kButton - 4, kRow - 10, key, 6);
+        draw::fillRect(renderer, kRail - kButton + 2, 5, kButton - 4, kRow - 10, key, 6);
+        draw::strokeRect(renderer, kRail - 1.5f * kButton - 9, kRow / 2 - 7, 18, 14, fullscreen() ? accent : text, 2, 2);
+        draw::text(renderer, kRail - 0.5f * kButton, kRow / 2 + 6, 12, text, "<<", 1);
+        row(1, "Controller", host ? lib.controllers[size_t(controller)]->name() : "none");
         std::string snd = lib.instruments.empty() ? "none" : lib.instruments[size_t(sound)].pkg->name();
-        row(2, "Sound", compiling ? snd + "..." : snd, true);
+        row(2, "Sound", compiling ? snd + "..." : snd);
         draw::line(renderer, 12, 3.5f * kRow, kRail - 12, 3.5f * kRow, rgba(0x9AA2B460), 1);
         if (host) {
             const mpe::Json& s = host->manifest()["settings"];
@@ -411,11 +504,9 @@ struct App {
             for (size_t i = 0; i < settings.size(); i++) {
                 float y = kSettingsTop + float(i) * rh - settingsScroll;
                 if (y < kSettingsTop - 1 || y + rh > h - kBottom + 1) continue;   // scrolled out of the rail
-                draw::text(renderer, 12, y + (big ? 19 : 12), big ? 11 : 8, dim, s[i]["name"].str());
-                draw::text(renderer, 12, y + (big ? 37 : 26), big ? 13 : 10, text, settingValue(i));
-                float ay = big ? y + 34 : y + 25;
-                draw::text(renderer, kRail - 34, ay, big ? 13 : 11, dim, "<");
-                draw::text(renderer, kRail - 16, ay, big ? 13 : 11, dim, ">");
+                draw::text(renderer, 12, y + (big ? 19 : 12), big ? 11 : 8, dim, fit(s[i]["name"].str(), big ? 11 : 8));
+                draw::text(renderer, 12, y + (big ? 37 : 26), big ? 13 : 10, text, fit(settingValue(i), big ? 13 : 10));
+                arrows(y, rh);
             }
             float rows = float(settings.size()) * rh, room = h - kBottom - kSettingsTop;
             if (rows > room) {                   // a scroll bar: how much of the settings shows, and where
@@ -433,7 +524,7 @@ struct App {
         }
         mpe::Stats st = engine->stats();
         char b[96];
-        std::snprintf(b, sizeof b, "Latency %.1f ms (max %.1f)", st.eventAgeAvgMs, st.eventAgeMaxMs);
+        std::snprintf(b, sizeof b, "Latency %.1f ms, max %.1f", st.eventAgeAvgMs, st.eventAgeMaxMs);
         draw::text(renderer, 12, h - 30, 10, dim, b);
         std::snprintf(b, sizeof b, "Load %.0f%%  Voices %d", 100 * st.loadAvg, engine->activeVoices());
         draw::text(renderer, 12, h - 14, 10, dim, b);
@@ -463,6 +554,10 @@ struct App {
         if (!status.empty()) draw::text(renderer, 16, sh - 16, 12, rgba(0xFFC857FF), status);
         SDL_SetRenderViewport(renderer, nullptr);
         if (!railHidden) drawRail(sh);
+        else {                                           // the corner button that brings the rail back
+            draw::fillRect(renderer, 6, 6, 36, 36, rgba(0x07080BCC), 8);
+            draw::text(renderer, 24, 30, 12, rgba(0xFFFFFFD9), ">>", 1);
+        }
         SDL_RenderPresent(renderer);
     }
 };
@@ -607,7 +702,16 @@ int main(int argc, char** argv) {
     SDL_SetRenderScale(app.renderer, density > 0 ? density : 1, density > 0 ? density : 1);
     app.startAudio();
 
-    // Start on the flute (or --sound) and the first controller (or --controller).
+    // Where you left off (not for a self-test, which neither reads nor writes it): the controller,
+    // the sound, each controller's settings, the rail and full screen.
+    app.persist = !selftestOut;
+    if (app.persist) {
+        app.loadConfig();
+        if (controllerId.empty()) controllerId = app.savedController;
+        if (soundId.empty()) soundId = app.savedSound;
+        if (app.savedFullscreen) SDL_SetWindowFullscreen(app.window, true);
+    }
+    // Else the flute (or --sound) and the first controller (or --controller).
     if (soundId.empty()) soundId = "patrickreynolds/flute";
     int sound = 0, ctl = 0;
     for (size_t i = 0; i < app.lib.instruments.size(); i++) {

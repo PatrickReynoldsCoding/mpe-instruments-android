@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "name": "Grid",
   "description": "Square keys, upright: the notes climb row by row; drag to bend toward the next, wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -10,7 +10,7 @@
     "fingers": 10,
     "touchSize": false
   },
-  "orientation": "upright",
+  "orientation": "any",
   "parts": [
     "Main"
   ],
@@ -250,6 +250,17 @@
         "Off",
         "Left",
         "Right"
+      ],
+      "default": 0
+    },
+    {
+      "id": "turn",
+      "name": "Turn",
+      "type": "choice",
+      "options": [
+        "Auto (sideways when wide)",
+        "Upright",
+        "Sideways"
       ],
       "default": 0
     }

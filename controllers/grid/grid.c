@@ -26,9 +26,10 @@
 enum {
     S_COLS, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
     S_ACROSS, S_UPDOWN, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_LATCH, S_LATCHMODE, S_BAR,
-    S_SIDE0, S_COUNT = S_SIDE0 + 4
+    S_SIDE0, S_TURN = S_SIDE0 + 4, S_COUNT
 };
-static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 2, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0};
+static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 2, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0};
+enum { TURN_AUTO, TURN_UPRIGHT, TURN_SIDEWAYS };
 
 enum { T_NONE, T_LOUDNESS, T_TONE, T_BEND, T_VOLUME };
 enum { LATCH_CHORD, LATCH_TAP };
@@ -82,7 +83,12 @@ static const unsigned NAMED[12] = {
 static const Theme* theme(void) { int k = (int)set_[S_THEME]; return &THEMES[k < 0 || k > 5 ? 0 : k]; }
 
 /* ---- the surface ---------------------------------------------------------------------------- */
-static float W = 400, H = 700;
+static void turn_to(float sw, float sh);
+/* The Grid is laid out upright, W x H; turned sideways (for a tablet held wide) everything it
+   draws and every touch is turned a quarter: the bottom of the upright grid (its low notes) on
+   the left, its right edge at the bottom. SW x SH is the surface itself. */
+static float W = 400, H = 700, SW = 400, SH = 700;
+static int turned;
 static int eink;
 static float center = 60;          /* the middle of the instrument, as a MIDI note */
 static double now, last_tick = -1;
@@ -379,6 +385,31 @@ static void resend_all(void) {
     for (int k = 0; k < nlatched; k++) send(&latched[k]);
 }
 
+
+/* ---- drawing, turned or not ----------------------------------------------------------------------- */
+/* Upright (x, y) on the surface: turned, x along the upright grid goes down the surface and y,
+   from the bottom, goes left to right. */
+static float tx(float x, float y) { return turned ? H - y : x; }
+static float ty(float x, float y) { return turned ? x : y; }
+static void g_clear(unsigned c) { mesh_clear(c); }
+static void g_rect(float x, float y, float w, float h, float r, unsigned fill, unsigned stroke, float sw) {
+    if (turned) mesh_rect(H - (y + h), x, h, w, r, fill, stroke, sw);
+    else mesh_rect(x, y, w, h, r, fill, stroke, sw);
+}
+static void g_circle(float x, float y, float r, unsigned fill, unsigned stroke, float sw) { mesh_circle(tx(x, y), ty(x, y), r, fill, stroke, sw); }
+static void g_line(float x1, float y1, float x2, float y2, unsigned c, float w) { mesh_line(tx(x1, y1), ty(x1, y1), tx(x2, y2), ty(x2, y2), c, w); }
+static void g_glow(float x, float y, float r, unsigned a, unsigned b) { mesh_glow(tx(x, y), ty(x, y), r, a, b); }
+/* Text centred on an upright point, then moved by (dx, dy) on the surface itself: lines of a
+   button stay one above the other, turned or not. */
+static void g_text_at(float x, float y, float dx, float dy, float size, unsigned c, int flags, const char* str) {
+    mesh_text(tx(x, y) + dx, ty(x, y) + dy + size * 0.35f, size, c, flags, str);
+}
+/* Text stays upright: its middle is moved, and it is drawn level there. */
+static void g_text(float x, float y, float size, unsigned c, int flags, const char* str) {
+    float my = y - size * 0.35f;
+    mesh_text(tx(x, my), ty(x, my) + size * 0.35f, size, c, flags, str);
+}
+
 /* ---- the side controls ---------------------------------------------------------------------- */
 static float frac(SideTouch* s, float y) { return clampf(1 - (y - s->top) / s->h, 0, 1); }
 
@@ -459,25 +490,31 @@ static char* put_int(char* p, int v, int plus) {
 static void draw_button(SideRect* r, const char* label, const char* value, int on, const Theme* th, unsigned ink) {
     unsigned fill = on ? (eink ? BLACK : mesh_alpha(ink, 0.85f)) : eink ? WHITE : th->square;
     unsigned edge = on ? (eink ? BLACK : th->hot) : mesh_alpha(ink, 0.5f);
-    mesh_rect(r->x, r->y, r->w, r->h, 10, fill, edge, 1.5f);
+    g_rect(r->x, r->y, r->w, r->h, 10, fill, edge, 1.5f);
     unsigned text = on ? (eink ? WHITE : th->on_light) : ink;
     float cx = r->x + r->w / 2, cy = r->y + r->h / 2;
-    mesh_text(cx, cy - 1, 12, text, MESH_TEXT_CENTER | MESH_TEXT_BOLD, label);
-    mesh_text(cx, cy + 12, 10, mesh_alpha(text, 0.75f), MESH_TEXT_CENTER, value);
+    g_text_at(cx, cy, 0, -7, 11, text, MESH_TEXT_CENTER | MESH_TEXT_BOLD, label);
+    g_text_at(cx, cy, 0, 8, 9, mesh_alpha(text, 0.75f), MESH_TEXT_CENTER, value);
 }
 
 static void draw_slider(SideRect* r, const char* label, const char* value, float at, int ticks, const Theme* th, unsigned ink) {
-    mesh_rect(r->x, r->y, r->w, r->h, 10, eink ? WHITE : th->square, mesh_alpha(ink, touched[r->control] ? 0.9f : 0.5f), 1.5f);
+    g_rect(r->x, r->y, r->w, r->h, 10, eink ? WHITE : th->square, mesh_alpha(ink, touched[r->control] ? 0.9f : 0.5f), 1.5f);
     float top = r->y + 46, bot = r->y + r->h - 12;
     for (int i = 0; i < ticks; i++) {
         float y = bot - (bot - top) * (float)i / (float)(ticks - 1);
-        mesh_line(r->x + r->w * 0.3f, y, r->x + r->w * 0.7f, y, mesh_alpha(ink, 0.3f), 1);
+        g_line(r->x + r->w * 0.3f, y, r->x + r->w * 0.7f, y, mesh_alpha(ink, 0.3f), 1);
     }
     float y = bot - (bot - top) * clampf(at, 0, 1), mid = bot - (bot - top) * 0.5f, x = r->x + r->w / 2;
-    mesh_line(x, mid, x, y, mesh_alpha(ink, 0.6f), 4);
-    mesh_rect(r->x + r->w * 0.18f, y - 5, r->w * 0.64f, 10, 5, eink ? BLACK : th->hot, 0, 0);
-    mesh_text(x, r->y + 15, 11, ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, label);
-    mesh_text(x, r->y + 28, 10, mesh_alpha(ink, 0.75f), MESH_TEXT_CENTER, value);
+    g_line(x, mid, x, y, mesh_alpha(ink, 0.6f), 4);
+    g_rect(r->x + r->w * 0.18f, y - 5, r->w * 0.64f, 10, 5, eink ? BLACK : th->hot, 0, 0);
+    /* The name and value at the slider's top end (upright), its right end (turned). */
+    if (turned) {
+        g_text_at(x, r->y + 22, 0, -7, 11, ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, label);
+        g_text_at(x, r->y + 22, 0, 7, 9, mesh_alpha(ink, 0.75f), MESH_TEXT_CENTER, value);
+    } else {
+        g_text(x, r->y + 15, 11, ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, label);
+        g_text(x, r->y + 28, 10, mesh_alpha(ink, 0.75f), MESH_TEXT_CENTER, value);
+    }
 }
 
 static void draw_sides(const Theme* th) {
@@ -545,7 +582,7 @@ static void draw_bar(const Theme* th) {
     if (bar_x < 0) return;
     int flat = eink;
     unsigned ink = flat ? BLACK : th->light;
-    mesh_rect(bar_x + 3, 4, BAR - 6, H - 8, 8, flat ? WHITE : mesh_alpha(th->square, 0.9f), mesh_alpha(ink, 0.35f), 1);
+    g_rect(bar_x + 3, 4, BAR - 6, H - 8, 8, flat ? WHITE : mesh_alpha(th->square, 0.9f), mesh_alpha(ink, 0.35f), 1);
     int r0 = (int)floorf_(pos) - 1, r1 = (int)floorf_(pos + shown) + 1;
     for (int r = r0; r <= r1; r++) {
         int root = -1;
@@ -555,10 +592,12 @@ static void draw_bar(const Theme* th) {
         if (y < 10 || y > H - 10) continue;
         unsigned c = note_colour(root);
         unsigned mark = c && !flat ? c : ink;
-        mesh_line(bar_x + 5, y, bar_x + BAR - 5, y, mesh_alpha(mark, 0.8f), 2);
+        g_line(bar_x + 5, y, bar_x + BAR - 5, y, mesh_alpha(mark, 0.8f), 2);
         char name[8];
         note_name(name, root, 1);
-        mesh_text(bar_x + BAR / 2, y - 5, 10, mark, MESH_TEXT_CENTER | MESH_TEXT_BOLD, name);
+        /* The octave beside its mark: above it upright, to its right turned. */
+        if (turned) g_text_at(bar_x + BAR / 2, y, 6, 0, 10, mark, MESH_TEXT_LEFT | MESH_TEXT_BOLD, name);
+        else g_text_at(bar_x + BAR / 2, y, 0, -9, 10, mark, MESH_TEXT_CENTER | MESH_TEXT_BOLD, name);
     }
 }
 
@@ -569,7 +608,7 @@ static void draw(void) {
     const Theme* th = theme();
     int flat = eink;
     mesh_begin();
-    mesh_clear(flat ? WHITE : th->background);
+    g_clear(flat ? WHITE : th->background);
     float radius = cell * 0.08f, side = cell - gap;
     unsigned light = flat ? BLACK : th->light;
     int r0 = (int)floorf_(pos) - 1, r1 = (int)floorf_(pos + shown) + 1;
@@ -587,13 +626,13 @@ static void draw(void) {
         /* The square: a shade apart from the background, tinted with its note's colour; a note
            outside the scale sinks nearly into the background. */
         if (!flat) {
-            mesh_rect(ox, oy, side, side, radius, off ? mesh_alpha(th->square, 0.3f) : th->square, 0, 0);
-            if (colour && glow < 1) mesh_rect(ox, oy, side, side, radius, mesh_alpha(colour, th->bright ? 0.35f : 0.22f), 0, 0);
+            g_rect(ox, oy, side, side, radius, off ? mesh_alpha(th->square, 0.3f) : th->square, 0, 0);
+            if (colour && glow < 1) g_rect(ox, oy, side, side, radius, mesh_alpha(colour, th->bright ? 0.35f : 0.22f), 0, 0);
         }
         /* The light: an outer bloom, then the fill. */
         if (glow > 0) {
-            if (!flat && !th->bright) mesh_rect(ox - 6, oy - 6, side + 12, side + 12, radius + 6, mesh_alpha(lit, 0.28f * glow), 0, 0);
-            mesh_rect(ox, oy, side, side, radius, mesh_alpha(lit, (flat ? 1 : 0.92f) * glow), 0, 0);
+            if (!flat && !th->bright) g_rect(ox - 6, oy - 6, side + 12, side + 12, radius + 6, mesh_alpha(lit, 0.28f * glow), 0, 0);
+            g_rect(ox, oy, side, side, radius, mesh_alpha(lit, (flat ? 1 : 0.92f) * glow), 0, 0);
         }
         /* The outline: the root's fully lit, the scale's soft, a note outside the scale faint. */
         unsigned edge;
@@ -602,11 +641,11 @@ static void draw(void) {
         else if (colour) edge = mesh_alpha(colour, root ? 1 : 0.8f);
         else edge = root ? light : mesh_alpha(light, flat ? 0.8f : 0.38f);
         if (root && !flat && !on && !th->bright)
-            mesh_rect(ox - 3, oy - 3, side + 6, side + 6, radius + 3, 0, mesh_alpha(colour ? colour : light, 0.18f), 6);
-        mesh_rect(ox, oy, side, side, radius, 0, edge, off ? 1.0f : root ? 2.5f : 1.5f);
+            g_rect(ox - 3, oy - 3, side + 6, side + 6, radius + 3, 0, mesh_alpha(colour ? colour : light, 0.18f), 6);
+        g_rect(ox, oy, side, side, radius, 0, edge, off ? 1.0f : root ? 2.5f : 1.5f);
         /* A latched square: a dot in its corner, as long as it is held. */
         if (kept && !on)
-            mesh_circle(ox + side * 0.84f, oy + side * 0.16f, side * 0.06f,
+            g_circle(ox + side * 0.84f, oy + side * 0.16f, side * 0.06f,
                         glow > 0.5f ? (flat ? WHITE : th->on_light) : (flat ? BLACK : th->hot), 0, 0);
         if (set_[S_LABELS] != 0) {
             float size = side * 0.16f;
@@ -614,13 +653,13 @@ static void draw(void) {
                         : mesh_alpha(colour ? colour : light, off ? 0.3f : 0.85f);
             char name[16];
             note_name(name, note, root);
-            mesh_text(ox + side / 2, oy + side / 2 + size * 0.35f, size, tc, MESH_TEXT_CENTER | (root ? MESH_TEXT_BOLD : 0), name);
+            g_text(ox + side / 2, oy + side / 2 + size * 0.35f, size, tc, MESH_TEXT_CENTER | (root ? MESH_TEXT_BOLD : 0), name);
         }
     }
     /* A halo that follows each finger. */
     if (!flat && !th->bright)
         for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used)
-            mesh_glow(fingers[k].x, fingers[k].y, cell * 0.9f, mesh_alpha(th->hot, 0.5f), mesh_alpha(th->light, 0));
+            g_glow(fingers[k].x, fingers[k].y, cell * 0.9f, mesh_alpha(th->hot, 0.5f), mesh_alpha(th->light, 0));
     draw_bar(th);
     draw_sides(th);
     mesh_end();
@@ -628,8 +667,18 @@ static void draw(void) {
 }
 
 /* ---- the interface ------------------------------------------------------------------------------- */
+/* Upright or sideways: Auto turns it sideways when the surface is wider than it is tall. */
+static void turn_to(float sw, float sh) {
+    SW = sw; SH = sh;
+    int t = (int)set_[S_TURN];
+    turned = t == TURN_SIDEWAYS || (t == TURN_AUTO && sw > sh * 1.05f);
+    W = turned ? sh : sw;
+    H = turned ? sw : sh;
+}
+
 MESH_EXPORT(init) void init(float width, float height, int flags, double t) {
-    W = width; H = height; eink = flags & MESH_EINK; now = t;
+    eink = flags & MESH_EINK; now = t;
+    turn_to(width, height);
     layout();
     draw();
 }
@@ -642,6 +691,7 @@ MESH_EXPORT(setting) void setting(int index, double value) {
     if (index < 0 || index >= S_COUNT) return;
     set_[index] = value;
     if (index == S_LATCH) set_latch(value != 0);
+    if (index == S_TURN) turn_to(SW, SH);
     layout();
     clamp_pos();
 }
@@ -649,6 +699,7 @@ MESH_EXPORT(setting) void setting(int index, double value) {
 MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, float force, double t) {
     (void)size; (void)force;
     now = t;
+    if (turned) { float ux = y, uy = H - x; x = ux; y = uy; }   /* the touch, as on the upright grid */
     id += 1;    /* 0 marks a free side touch */
     if (phase == MESH_DOWN) {
         if (find(id)) up(id);

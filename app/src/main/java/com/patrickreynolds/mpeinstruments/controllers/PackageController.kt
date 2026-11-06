@@ -24,7 +24,9 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject) 
     override val name: String get() = Controllers.nameFor(manifest.optString("name", id))
     override val description: String = manifest.optString("description") + " · from a controller package (.odoc)"
     private val orientation = manifest.optString("orientation", "landscape")
-    override val landscape = orientation != "portrait" && orientation != "upright"
+    // "landscape": on its side; "upright": stays upright, the screen still; "portrait" or "any":
+    // as the device is held (a controller that turns itself, as the Grid does, says "any").
+    override val landscape = orientation == "landscape"
     override val upright = orientation == "upright"
     private val parts: List<String> = manifest.optJSONArray("parts")?.let { a -> List(a.length()) { a.optString(it) } } ?: listOf("Main")
     override val shape get() = EngineShape(split = parts.size > 1, parts = parts.size.coerceIn(2, 4), transpose = 0, bendRange = 48f)
