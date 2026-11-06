@@ -368,13 +368,16 @@ private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, 
                     if (s.chordMode == 0) {
                         Text("Scale", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                         Chips(SCALES.map { if (it.mask == 0) "All notes" else it.name }, s.scale, accent) { k -> set { it.copy(scale = k) } }
-                    } else Text(if (s.chordMode == 1)
-                        "The left of the pad is a circle of fifths: tap a chord and the pad holds only its notes. The outer ring is " +
-                        "major chords, the middle their relative minors, the inner diminished; hold a ring to change what it plays. " +
-                        "The buttons under the wheel add a 7th, 9th, 6th..."
-                        else "The left of the pad is a grid of chords: the roots across, a chord type in each row. Tap one and the pad " +
-                        "holds only its notes. Hold a row's name to change its chord type.", color = TextDim, fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 6.dp))
+                    } else {
+                        Text(if (s.chordMode == 1)
+                            "The left of the pad is a circle of fifths: touch a chord and the pad holds only its notes; slide to " +
+                            "the next without lifting. The outer ring is major chords, the middle their relative minors, the inner " +
+                            "diminished: change them below. The buttons under the wheel add a 7th, 9th, 6th..."
+                            else "The left of the pad is a grid of chords: the roots across, a chord type in each row. Touch one and " +
+                            "the pad holds only its notes; slide to the next without lifting. Change the rows below.",
+                            color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                        ChordLayoutEditor(side, s, accent)
+                    }
                 }
                 "Up/down" -> {
                     Chips(PadSettings.VERTICAL, s.vertical, accent) { k -> set { it.copy(vertical = k) } }
@@ -508,7 +511,7 @@ private class Pad {
         }
     }
 
-    class Finger(val channel: Int, val note: Int, val zone: Int, val cols: IntArray, var x: Float, var y: Float) {
+    class Finger(val channel: Int, val note: Int, val zone: Int, var cols: IntArray, var x: Float, var y: Float) {
         // x is across the finger's own pad (0..1), and may go past its edges.
         var base = 0f              // pitch from where the finger is
         var col = -1               // Snap: the column it is playing
@@ -559,7 +562,16 @@ private class Pad {
             val notesAt = a + pickerFrac(pads[k], drums[k], (b - a) * widthDp) * (b - a)
             if (z.s != pads[k] || z.x0 != notesAt || z.x1 != b || z.drums != drums[k]) dirty = true
             z.start = a; z.x0 = notesAt; z.x1 = b
+            val before = z.columns
             z.set(pads[k], centers[k], drums[k])
+            // A new chord: fingers held on this pad move to the same column of it, so the sound
+            // changes with the chord. (In scale mode a finger keeps the notes it went down on.)
+            if (z.chords && !before.contentEquals(z.columns)) for (f in fingers.values) if (f.zone == k) {
+                f.cols = z.columns
+                if (f.col >= f.cols.size) f.col = f.cols.lastIndex
+                place(f)
+                sendExpression(f)
+            }
         }
         if (t !== theme || split != this.split) dirty = true
         this.split = split; theme = t
@@ -687,7 +699,7 @@ private class Pad {
             sendExpression(f)
             if (!theme.flat) {
                 val z = zones.getOrNull(f.zone) ?: continue
-                val tx = if (z.drums) (f.col + 0.5f) / z.columns.size else xOf(z, f.pitch + mod.bend)
+                val tx = fingerX(z, f)
                 f.trail.addLast(Offset(z.global(tx), f.y))   // the trail shows the gyro's vibrato too
                 if (f.trail.size > 28) f.trail.removeFirst()
             }
@@ -761,6 +773,17 @@ private class Pad {
         z.drums -> n % 12 == 0
         z.chords -> ((n - z.s.chordRoot) % 12 + 12) % 12 == 0
         else -> ((n - z.s.key) % 12 + 12) % 12 == 0
+    }
+
+    /**
+     * Where to draw a finger across its pad (0..1): a drum on its column; in a chord mode where the
+     * finger is (the notes change under it with the chord); otherwise where its pitch is, so the
+     * glide and the gyro's bend show.
+     */
+    private fun fingerX(z: Zone, f: Finger) = when {
+        z.drums -> (f.col + 0.5f) / z.columns.size
+        z.chords -> f.x
+        else -> xOf(z, f.pitch + mod.bend)
     }
 
     /** Where a pitch is across a pad (0..1): a kit's drum is wherever its column is. */
@@ -839,7 +862,7 @@ private class Pad {
                 val a = (k + 1f) / f.trail.size
                 drawCircle(c.copy(alpha = 0.22f * a), radius = 8f + 26f * a, center = Offset(p.x * w, (1 - p.y) * playH))
             }
-            val fx = if (z.drums) (f.col + 0.5f) / z.columns.size else xOf(z, f.pitch + mod.bend)
+            val fx = fingerX(z, f)
             orb(Offset(z.global(fx) * w, (1 - f.y) * playH), loudness(f.pressure / 127f), c)
         }
         drawHud(this, playH)
