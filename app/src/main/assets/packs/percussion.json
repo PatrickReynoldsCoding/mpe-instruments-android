@@ -1,0 +1,57 @@
+{
+  "id": "percussion",
+  "name": "Percussion",
+  "order": 6,
+  "description": "The twelve-drum kit, and drums and metal played by pitch: timpani, taiko, 808 boom, conga, djembe, woodblock and cowbell. Quick sketches.",
+  "source": "https://github.com/PatrickReynoldsCoding/faust-mpe-instruments",
+  "defaults": {
+    "reverb": 0.2,
+    "reverbSize": 0.3,
+    "reverbDamp": 0.4,
+    "delay": 0,
+    "brightness": 1,
+    "drive": 0,
+    "pressureCurve": 1,
+    "release": 0
+  },
+  "groups": [
+    {
+      "id": "kit",
+      "name": "Kit",
+      "instruments": [
+        "drums/kit"
+      ]
+    },
+    {
+      "id": "tuned",
+      "name": "Tuned drums",
+      "instruments": [
+        "percussion/timpani",
+        "percussion/taiko",
+        "percussion/808-kick",
+        "percussion/conga",
+        "percussion/djembe"
+      ]
+    },
+    {
+      "id": "metal",
+      "name": "Wood & metal",
+      "instruments": [
+        "percussion/woodblock",
+        "percussion/cowbell"
+      ]
+    }
+  ],
+  "overrides": {
+    "drums/kit": {
+      "reverb": 0.08,
+      "reverbSize": 0.245,
+      "reverbDamp": 0.4,
+      "delay": 0,
+      "brightness": 1,
+      "drive": 0,
+      "pressureCurve": 1,
+      "release": 0
+    }
+  }
+}

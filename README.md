@@ -9,7 +9,7 @@ Seaboard -> android.media.midi -> core (clean) -> parts (play / arp) -> Faust vo
 ```
 
 What it does:
-
+- **62 instruments in six packs** (Classical; Keys & Organs; Plucked & Struck; Winds, Brass & Voices; Synthesizers; Percussion), each finger its own voice (MPE): pitch glides,
 - **14 physical-model and synth instruments**, each finger its own voice (MPE): pitch glides,
   pressure swells, slide shapes the tone.
 - **Split and layer**: two instruments, left and right of a split point (or "learn" it from a

@@ -1,0 +1,67 @@
+{
+  "id": "plucked-and-struck",
+  "name": "Plucked & Struck",
+  "order": 3,
+  "description": "Guitars, harp, banjo and dulcimer; marimba, vibraphone, kalimba, glockenspiel, xylophone, steel drum and tubular bell. Quick sketches.",
+  "source": "https://github.com/PatrickReynoldsCoding/faust-mpe-instruments",
+  "defaults": {
+    "reverb": 0.3,
+    "reverbSize": 0.3,
+    "reverbDamp": 0.4,
+    "delay": 0,
+    "brightness": 1,
+    "drive": 0,
+    "pressureCurve": 1,
+    "release": 0
+  },
+  "groups": [
+    {
+      "id": "plucked",
+      "name": "Plucked",
+      "instruments": [
+        "plucked/nylon-guitar",
+        "plucked/steel-guitar",
+        "plucked/electric-guitar",
+        "plucked/bass-guitar",
+        "plucked/banjo",
+        "plucked/harp",
+        "plucked/dulcimer"
+      ]
+    },
+    {
+      "id": "struck",
+      "name": "Struck",
+      "instruments": [
+        "struck/marimba",
+        "struck/vibraphone",
+        "struck/kalimba",
+        "struck/glockenspiel",
+        "struck/xylophone",
+        "struck/steel-drum",
+        "struck/tubular-bell"
+      ]
+    }
+  ],
+  "overrides": {
+    "plucked/electric-guitar": {
+      "reverb": 0.2,
+      "reverbSize": 0.245,
+      "reverbDamp": 0.4,
+      "delay": 0.2,
+      "brightness": 1,
+      "drive": 0.2,
+      "pressureCurve": 1,
+      "release": 0
+    },
+    "struck/tubular-bell": {
+      "reverb": 0.55,
+      "reverbSize": 0.7,
+      "reverbDamp": 0.4,
+      "delay": 0,
+      "brightness": 1,
+      "drive": 0,
+      "pressureCurve": 1,
+      "release": 0
+    }
+  }
+}

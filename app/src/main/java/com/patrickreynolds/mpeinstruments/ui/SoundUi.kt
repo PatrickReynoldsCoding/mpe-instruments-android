@@ -32,6 +32,7 @@ import com.patrickreynolds.mpeinstruments.AppState
 import com.patrickreynolds.mpeinstruments.DELAY_TIMES
 import com.patrickreynolds.mpeinstruments.NOTE_NAMES
 import com.patrickreynolds.mpeinstruments.SCALES
+import com.patrickreynolds.mpeinstruments.packs.InstrumentPack
 import com.patrickreynolds.mpeinstruments.packs.Packs
 import kotlin.math.roundToInt
 
@@ -170,14 +171,14 @@ fun ReleaseSlider(k: Int, c: Color) {
 }
 
 /**
- * Every sound of every pack, at a glance: a row of chips for each of the pack's groups, so none
+ * The sounds of [only] (default: every pack), at a glance: a row of chips for each group, so none
  * is hidden below the fold. Picking one gives part [k] that instrument with its pack's effects.
  */
 @Composable
-fun SoundPicker(k: Int, accent: Color, picked: () -> Unit = {}) {
+fun SoundPicker(k: Int, accent: Color, only: InstrumentPack? = null, picked: () -> Unit = {}) {
     val chosen = AppState.perf.part(k).instrument
-    for (pack in Packs.all) {
-        if (Packs.all.size > 1) Text(pack.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+    for (pack in if (only != null) listOf(only) else Packs.all) {
+        if (only == null && Packs.all.size > 1) Text(pack.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
         for (g in pack.groups) {
             Text(g.name.uppercase(), color = TextDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             Chips(g.instruments.map { it.name }, g.instruments.indexOfFirst { it.id == chosen }, accent) { i ->

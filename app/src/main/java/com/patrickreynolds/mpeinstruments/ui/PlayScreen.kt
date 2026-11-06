@@ -144,7 +144,7 @@ fun LibraryScreen() {
             Text(pack.description, color = TextDim, fontSize = 12.sp)
             Text("Pick one for " + (if (AppState.twoParts) "the ${partLabel(AppState.part).lowercase()} sound." else "the sound in use."),
                  color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-            SoundPicker(AppState.part, PartColors[AppState.part])
+            SoundPicker(AppState.part, PartColors[AppState.part], only = pack)
         }
         SectionCard("Controllers") {
             for (c in Controllers.all) {

@@ -1,0 +1,54 @@
+{
+  "id": "keys-and-organs",
+  "name": "Keys & Organs",
+  "order": 2,
+  "description": "Quick sketches of electric pianos, clavs, harpsichord, celesta and a set of organs and reed organs.",
+  "source": "https://github.com/PatrickReynoldsCoding/faust-mpe-instruments",
+  "defaults": {
+    "reverb": 0.3,
+    "reverbSize": 0.3,
+    "reverbDamp": 0.4,
+    "delay": 0,
+    "brightness": 1,
+    "drive": 0,
+    "pressureCurve": 1,
+    "release": 0
+  },
+  "groups": [
+    {
+      "id": "keys",
+      "name": "Keys",
+      "instruments": [
+        "keys/rhodes",
+        "keys/wurlitzer",
+        "synths/fm-keys",
+        "keys/clavinet",
+        "keys/harpsichord",
+        "keys/celesta",
+        "keys/toy-piano"
+      ]
+    },
+    {
+      "id": "organs",
+      "name": "Organs",
+      "instruments": [
+        "organs/organ",
+        "organs/church-organ",
+        "organs/accordion",
+        "organs/harmonium"
+      ]
+    }
+  ],
+  "overrides": {
+    "organs/church-organ": {
+      "reverb": 0.6,
+      "reverbSize": 0.7,
+      "reverbDamp": 0.4,
+      "delay": 0,
+      "brightness": 1,
+      "drive": 0,
+      "pressureCurve": 1,
+      "release": 0
+    }
+  }
+}
