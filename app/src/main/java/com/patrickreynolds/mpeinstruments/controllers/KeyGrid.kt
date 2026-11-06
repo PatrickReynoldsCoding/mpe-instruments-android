@@ -37,21 +37,19 @@ object KeyGrid : Controller {
     val TARGETS = listOf("Nothing", "Loudness", "Tone", "Bend", "Volume")
     const val NONE = 0; const val LOUDNESS = 1; const val TONE = 2; const val BEND = 3; const val VOLUME = 4
 
-    /** One section's notes and arp: the whole grid's when it is not split. */
+    /** One section's notes: the whole grid's when it is not split. (Its arp is its part's, the app's.) */
     data class Section(
         val key: Int = 0,
         val scale: Int = 1,             // index into SCALES (the key's notes); Off is the same as chromatic
         val chromatic: Boolean = false, // every semitone, the notes outside the scale darkened
         val octave: Int = 0,            // on top of the grid's octave
-        val arp: Arp = Arp(),
     ) {
         fun json(): JSONObject = JSONObject().put("key", key).put("scale", scale).put("chromatic", chromatic)
-            .put("octave", octave).put("arp", arp.json())
+            .put("octave", octave)
         companion object {
             fun from(o: JSONObject?, d: Section = Section()) = if (o == null) d else Section(
                 o.optInt("key", d.key).coerceIn(0, 11), o.optInt("scale", d.scale).coerceIn(SCALES.indices),
-                o.optBoolean("chromatic", d.chromatic), o.optInt("octave", d.octave).coerceIn(-3, 3),
-                Arp.from(o.optJSONObject("arp"), d.arp).copy(latch = false))
+                o.optBoolean("chromatic", d.chromatic), o.optInt("octave", d.octave).coerceIn(-3, 3))
         }
     }
 
@@ -129,9 +127,9 @@ object KeyGrid : Controller {
 
     // The grid latches its own notes (it simply does not let them go), so the engine's arp latch stays off.
     override val shape get() = settings.let { s ->
-        EngineShape(split = s.count > 1, parts = s.count, arps = List(PARTS) { s.section(it).arp.copy(latch = false) },
-                    transpose = 0, bendRange = 48f)
+        EngineShape(split = s.count > 1, parts = s.count, arpLatch = false, transpose = 0, bendRange = 48f)
     }
+    override val arpNote get() = "To keep it going after you lift your hand, turn on Latch."
     override val splitNames get() = if (settings.count > 1) sectionNames(settings.count) else null
     override val partColors get() = gridPartColors(settings)
 
@@ -156,7 +154,7 @@ object KeyGrid : Controller {
     fun update(change: (Settings) -> Settings) {
         val now = change(settings)
         if (now == settings) return
-        val engine = now.sections.map { it.arp } != settings.sections.map { it.arp } || now.splits.size != settings.splits.size
+        val engine = now.splits.size != settings.splits.size
         settings = now
         AppState.controllerChanged(this, engine)
     }
@@ -169,11 +167,10 @@ object KeyGrid : Controller {
         val arp = Arp.from(o?.optJSONObject("arp"))
         // Before 4 there was one section, its notes and arp in the settings themselves.
         val first = Section(o?.optInt("key", 0)?.coerceIn(0, 11) ?: 0, o?.optInt("scale", 1)?.coerceIn(SCALES.indices) ?: 1,
-                            o?.optBoolean("chromatic", false) ?: false, 0, arp.copy(latch = false))
+                            o?.optBoolean("chromatic", false) ?: false, 0)
         val sections = o?.optJSONArray("sections")?.let { a -> List(PARTS) { Section.from(a.optJSONObject(it)) } }
             ?: listOf(first) + List(PARTS - 1) { Section() }
-        settings = if (o == null || o.optInt("v", 1) < 2) d.copy(sections = listOf(Section(arp = arp.copy(latch = false))) +
-                                                                     List(PARTS - 1) { Section() }, latch = arp.latch) else Settings(
+        settings = if (o == null || o.optInt("v", 1) < 2) d.copy(latch = arp.latch) else Settings(
             o.optInt("rows", d.rows).coerceIn(ROWS.first, ROWS.last), o.optInt("cols", d.cols).coerceIn(COLS.first, COLS.last),
             sections,
             o.optJSONArray("splits")?.let { a -> List(a.length()) { a.optInt(it) } }?.filter { it >= 1 }?.distinct()?.sorted()
@@ -191,7 +188,13 @@ object KeyGrid : Controller {
             o.optJSONArray("sides")?.let { a -> SIDE_CONTROLS.indices.map { a.optInt(it, OFF).coerceIn(OFF, RIGHT) } } ?: d.sides)
     }
 
-    override fun clearForPreset() { settings = settings.copy(sections = settings.sections.map { it.copy(arp = Arp()) }, latch = false) }
+    override fun clearForPreset() { settings = settings.copy(latch = false) }
+
+    /** Until 0.21 each section had its arp; before settings 4 the grid had one, in the settings themselves. */
+    override fun legacyArps(o: JSONObject?) = o?.let { s ->
+        s.optJSONArray("sections")?.let { a -> List(PARTS) { Arp.from(a.optJSONObject(it)?.optJSONObject("arp")) } }
+            ?: s.optJSONObject("arp")?.let { listOf(Arp.from(it)) }
+    }
 
     @Composable
     override fun options(part: Int) = keyGridOptions(part)

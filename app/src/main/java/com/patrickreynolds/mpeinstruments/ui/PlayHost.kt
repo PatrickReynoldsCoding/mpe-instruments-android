@@ -46,6 +46,8 @@ import com.patrickreynolds.mpeinstruments.GyroSettings
 import com.patrickreynolds.mpeinstruments.PadSettings
 import com.patrickreynolds.mpeinstruments.Part
 import com.patrickreynolds.mpeinstruments.PhoneMods
+import com.patrickreynolds.mpeinstruments.ARP_ORDERS
+import com.patrickreynolds.mpeinstruments.controllers.ArpUse
 import com.patrickreynolds.mpeinstruments.controllers.Controllers
 import com.patrickreynolds.mpeinstruments.controllers.Option
 import com.patrickreynolds.mpeinstruments.controllers.TouchPad
@@ -108,7 +110,7 @@ fun PlayHost(onClose: () -> Unit) {
     }
 }
 
-/** What every controller shares: presets, the sound and its effects, release, loops, and the phone's gyro and breath. */
+/** What every controller shares: presets, the sound and its effects, release, the arp, loops, and the phone's gyro and breath. */
 @Composable
 private fun sharedOptions(k: Int): List<Option> {
     val part = AppState.perf.part(k)
@@ -146,6 +148,20 @@ private fun sharedOptions(k: Int): List<Option> {
                       "like holding a piano's sustain pedal. A new note on the same finger cuts it off.",
                  color = TextDim, fontSize = 12.sp)
         },
+        // The app's arp, a modifier: on the rail unless the controller has none, or its own.
+        if (AppState.controller.arpUse == ArpUse.App) {
+            // Layered, both parts arpeggiate as the main one does, so that one is changed.
+            val layered = AppState.perf.layout(AppState.shape) == 2
+            val a = if (layered) 0 else k
+            val arp = AppState.perf.part(a).arp
+            Option("Arp", if (arp.on) ARP_ORDERS[arp.order.coerceIn(ARP_ORDERS.indices)] else "Off", perPart = !layered) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    ArpControls(arp, accent, latch = AppState.shape.arpLatch) { c -> AppState.updatePart(a) { it.copy(arp = c(it.arp)) } }
+                    if (arp.on) AppState.controller.arpNote?.let { Text(it, color = TextDim, fontSize = 12.sp) }
+                    TempoControls(accent)
+                }
+            }
+        } else null,
         Option("Loop", loopSummary(), perPart = false) {
             Column(Modifier.verticalScroll(rememberScrollState())) { LoopControls(accent) }
         },
@@ -172,7 +188,7 @@ private fun ControllerPicker(done: () -> Unit) {
                 Text(c.description, color = TextDim, fontSize = 12.sp)
             }
         }
-        Text("Each controller keeps its own settings. The sound, effects, loops and presets stay as they are when you switch.",
+        Text("Each controller keeps its own settings. The sound, its arp, effects, loops and presets stay as they are when you switch.",
              color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
     }
 }

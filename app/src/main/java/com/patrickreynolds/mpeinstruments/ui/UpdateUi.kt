@@ -58,7 +58,7 @@ fun UpdatesCard() {
                 LinearProgressIndicator(progress = { s.progress }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), color = PartColors[1])
             }
             is State.NeedsPermission -> {
-                Text("${s.release.version} is downloaded. Android needs your OK for MPE Instruments to install its updates: " +
+                Text("${s.release.version} is downloaded. Android needs your OK for odo to install its updates: " +
                      "turn on \"Allow from this source\", then come back.", fontSize = 13.sp)
                 Button(onClick = { context.startActivity(Updater.permissionSettings(context)) }, modifier = Modifier.padding(top = 8.dp),
                        colors = ButtonDefaults.buttonColors(containerColor = PartColors[1], contentColor = Ink)) {
@@ -95,7 +95,7 @@ private fun ReleaseInfo(r: Updater.Release) {
     Text("Version ${r.version} is available", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = PartColors[1])
     // The first lines of the release notes, without Markdown marks.
     val notes = r.notes.lines().map { it.replace(Regex("[#*`]"), "").trim() }.filter { it.isNotEmpty() }
-        .filterNot { it.startsWith("MPE Instruments") }.take(3).joinToString("\n")
+        .filterNot { it.startsWith("MPE Instruments") || it.startsWith("odo ") }.take(3).joinToString("\n")
     if (notes.isNotEmpty()) Text(notes, color = TextDim, fontSize = 12.sp, maxLines = 6, modifier = Modifier.padding(top = 4.dp))
     val mb = if (r.size > 0) " (%.1f MB)".format(r.size / 1e6) else ""
     Text("Downloads ${r.apkName}$mb from GitHub. Your settings and presets are kept.", color = TextDim, fontSize = 11.sp,

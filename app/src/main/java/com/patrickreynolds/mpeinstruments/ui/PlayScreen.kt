@@ -79,7 +79,7 @@ fun PlayScreen(stats: Stats?, openPlay: () -> Unit, openSetup: () -> Unit) {
                          modifier = Modifier.padding(start = 12.dp))
                 }
             }
-            Text("Built in. Each keeps its own settings; the sound, effects, loops and presets are shared.",
+            Text("Built in. Each keeps its own settings; the sound, its arp, effects, loops and presets are shared.",
                  color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         }
         val parts = (0 until AppState.partCount).toList()
@@ -197,7 +197,7 @@ internal fun presetSummary(p: Preset): String {
     val pad = p.controller == TouchPad.id
     val split = pad && s?.optBoolean("split") == true
     fun desc(k: Int) = name(p.perf.part(k).instrument) +
-        if (pad && s?.optJSONObject("arp$k")?.optBoolean("arp") == true) " arp" else ""
+        if (p.perf.part(k).arp.on) " arp" else ""
     val gridParts = if (p.controller == com.patrickreynolds.mpeinstruments.controllers.KeyGrid.id)
         (s?.optJSONArray("splits")?.length() ?: 0) + 1 else 1
     val sound = when {

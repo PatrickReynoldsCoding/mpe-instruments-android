@@ -36,7 +36,7 @@ import com.patrickreynolds.mpeinstruments.packs.InstrumentPack
 import com.patrickreynolds.mpeinstruments.packs.Packs
 import kotlin.math.roundToInt
 
-/** Play or arpeggiate, and the arp's settings: the touch pad's, for one pad. */
+/** Play or arpeggiate, and the arp's settings, for one part. [latch]: the controller lets the arp latch. */
 @Composable
 fun ArpControls(p: Arp, c: Color, latch: Boolean = true, change: ((Arp) -> Arp) -> Unit) {
     Segmented(listOf("Play", "Arpeggiate"), if (p.on) 1 else 0, accent = c) { i -> change { it.copy(on = i == 1) } }

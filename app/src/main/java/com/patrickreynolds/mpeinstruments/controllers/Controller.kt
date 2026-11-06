@@ -1,6 +1,7 @@
 package com.patrickreynolds.mpeinstruments.controllers
 
 import androidx.compose.runtime.Composable
+import com.patrickreynolds.mpeinstruments.Arp
 import com.patrickreynolds.mpeinstruments.EngineShape
 import org.json.JSONObject
 
@@ -8,7 +9,10 @@ import org.json.JSONObject
  * A controller: a way of playing the app's instruments. It sends MPE to the engine (through
  * Native.nativeTouch, the same parser as a Seaboard's), and brings its own settings, its own
  * options on the rail and its own play surface. What every controller shares (the sounds,
- * effects, release, loops, gyro and breath, presets) is the app's, around it.
+ * effects, release, the arp, loops, gyro and breath, presets) is the app's, around it.
+ *
+ * The app's modifiers (the arp; gyro and breath) work on whatever a controller plays. A
+ * controller can turn the arp off, or bring its own instead ([arpUse]).
  *
  * The touch pad and an external MIDI controller are built in. This is the seam a downloaded
  * controller, a plug-in, will implement.
@@ -25,8 +29,17 @@ interface Controller {
     /** The play surface is upright and stays so: the screen does not turn with the phone (the Grid). */
     val upright: Boolean get() = false
 
-    /** What it sets in the engine beside the sound: a split, the arps, pitch assist, transpose. */
+    /** What it sets in the engine beside the sound: a split, pitch assist, transpose; whether the app's arps play. */
     val shape: EngineShape
+
+    /** How it uses the app's arpeggiator: the app's (the default), none, or one of its own. */
+    val arpUse: ArpUse get() = ArpUse.App
+
+    /** A word on the app's arp with this controller, under its settings (the grid: how to keep it going). */
+    val arpNote: String? get() = null
+
+    /** Its arps from before 0.21, when they were its own, from settings saved by then; null if it had none. */
+    fun legacyArps(o: JSONObject?): List<Arp>? = null
 
     /** The parts (sounds) it plays, by name, when it splits the notes between them: "Left", "Right". */
     val splitNames: List<String>? get() = null
@@ -56,6 +69,16 @@ interface Controller {
 
     /** Let go of every note it holds (switching to another controller). */
     fun stop() {}
+}
+
+/** How a controller uses the app's arpeggiator. */
+enum class ArpUse {
+    /** The app's arp, on the rail, for each part the controller plays. */
+    App,
+    /** No arp: it makes no sense with this controller (one that plays its own rhythm, say). */
+    Off,
+    /** The controller arpeggiates itself, so the app's is off and not on the rail. */
+    Own,
 }
 
 /**

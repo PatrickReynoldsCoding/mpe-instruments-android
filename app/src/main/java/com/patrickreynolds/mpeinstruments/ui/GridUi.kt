@@ -167,13 +167,6 @@ fun keyGridOptions(part: Int): List<Option> {
                      color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
         },
-        Option("Arp", if (sec.arp.on) ARP_ORDERS[sec.arp.order] else "Off") {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                ArpControls(sec.arp, accent, latch = false) { c -> setSec { it.copy(arp = c(it.arp)) } }
-                if (sec.arp.on) Text("To keep it going after you lift your hand, turn on Latch.", color = TextDim, fontSize = 12.sp)
-                TempoControls(accent)
-            }
-        },
         Option("Sides", KeyGrid.SIDE_CONTROLS.indices.count { s.side(it) != KeyGrid.OFF }.let { if (it == 0) "Off" else "$it" },
                perPart = false) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -670,11 +663,11 @@ private fun SideStrip(controls: List<Int>, grid: Grid, th: GridTheme, turn: Floa
                            onPress = { v -> down = v; grid.hold(v) })
             }
             KeyGrid.S_ARP -> {
-                // The arp of the section the rail is on.
+                // The app's arp, of the section (part) the rail is on.
                 val k = AppState.part.coerceIn(0, s.count - 1)
-                val a = s.section(k).arp
+                val a = AppState.perf.part(k).arp
                 SideButton("Arp", if (a.on) ARP_ORDERS[a.order] else "off", a.on, th, ink, turn,
-                           onTap = { KeyGrid.update { st -> st.withSection(k) { it.copy(arp = it.arp.copy(on = !it.arp.on)) } } })
+                           onTap = { AppState.updatePart(k) { it.copy(arp = it.arp.copy(on = !it.arp.on)) } })
             }
             KeyGrid.S_SCROLL -> {
                 // Drag up and the rows slide down, bringing higher notes in: a row for every 1/8 of the strip.

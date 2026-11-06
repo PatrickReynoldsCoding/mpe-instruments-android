@@ -179,7 +179,8 @@ private const val SNAP_HOLD = 0.08f
 
 /**
  * The touch pad's options on the rail, for one pad (the left or right of a split): its notes,
- * up/down, glide, vibrato and arp; then, for the screen as a whole, the look, split and lock.
+ * up/down, glide and vibrato; then, for the screen as a whole, the look, split and lock. (The arp
+ * is the app's, on the rail with the sound.)
  */
 @Composable
 fun touchPadOptions(part: Int): List<Option> {
@@ -187,7 +188,6 @@ fun touchPadOptions(part: Int): List<Option> {
     val split = TouchPad.split
     val side = if (split) part.coerceIn(0, 1) else 0
     val s = TouchPad.pads[side]
-    val arp = TouchPad.arps[side]
     val accent = if (Eink) Color.Black else PartColors[side]
     fun set(change: (PadSettings) -> PadSettings) = TouchPad.update(side, change)
     val locked = TouchPad.pad.locked
@@ -263,14 +263,6 @@ fun touchPadOptions(part: Int): List<Option> {
                  color = TextDim, fontSize = 12.sp)
             Text("A shake of the phone can add vibrato too, with any controller: Gyro.", color = TextDim, fontSize = 12.sp,
                  modifier = Modifier.padding(top = 6.dp))
-        },
-        Option("Arp", if (arp.on) ARP_ORDERS[arp.order.coerceIn(ARP_ORDERS.indices)] else "Off") {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                ArpControls(arp, accent) { c -> TouchPad.updateArp(side, c) }
-                val bpm = AppState.perf.bpm
-                LabeledSlider("Tempo", bpm, 40f..220f, "${bpm.roundToInt()} bpm", accent = accent) { v ->
-                    AppState.update { it.copy(bpm = v.roundToInt().toFloat()) } }
-            }
         },
         Option("Look", if (Eink) "E-ink" else PAD_THEMES[TouchPad.pad.theme].name, perPart = false) {
             val p0 = TouchPad.pad

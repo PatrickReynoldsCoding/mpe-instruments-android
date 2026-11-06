@@ -22,7 +22,7 @@ class SynthService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
                                              PendingIntent.FLAG_IMMUTABLE)
         val notification = Notification.Builder(this, CHANNEL)
-            .setContentTitle("MPE Instruments")
+            .setContentTitle("odo")
             .setContentText("Ready to play")
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(open)

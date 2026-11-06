@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.patrickreynolds.mpeinstruments.controllers.ArpUse
 import com.patrickreynolds.mpeinstruments.controllers.Controller
 import com.patrickreynolds.mpeinstruments.controllers.Controllers
 import com.patrickreynolds.mpeinstruments.controllers.ExternalMidi
@@ -16,8 +17,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * A preset: the sound (parts, layer, tempo, effects), the controller it is played with and that
- * controller's settings (the touch pad's notes, split and arps, say). [controller] null (some
+ * A preset: the sound (parts and their arps, layer, tempo, effects), the controller it is played
+ * with and that controller's settings (the touch pad's notes and split, say). [controller] null (some
  * built-in presets): any controller, the one in use, with what is per preset turned off.
  * [settings] is kept as JSON text, so two presets compare by value.
  */
@@ -30,8 +31,13 @@ data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false
     companion object {
         fun from(o: JSONObject): Preset {
             val perf = o.getJSONObject("perf")
-            if (o.has("controller")) return Preset(o.getString("name"), Perf.from(perf), controller = o.getString("controller"),
-                                                   settings = o.optJSONObject("settings")?.toString())
+            if (o.has("controller")) {
+                val settings = o.optJSONObject("settings")
+                var p = Perf.from(perf)
+                // Saved by 0.16 to 0.20: the arps were the controller's.
+                if (Perf.arpsInController(perf)) Controllers.byId(o.getString("controller")).legacyArps(settings)?.let { p = p.withArps(it) }
+                return Preset(o.getString("name"), p, controller = o.getString("controller"), settings = settings?.toString())
+            }
             // Before 0.16: a touch pad preset, the pads (if it had them) beside the performance.
             val pad = o.optJSONObject("pad")
             val s = TouchPad.legacy(pad?.optJSONObject("left"), pad?.optJSONObject("right"),
@@ -65,8 +71,8 @@ object AppState {
     /** The controller in use: its options are on the rail and its surface is what you play. */
     var controller by mutableStateOf<Controller>(TouchPad)
         private set
-    /** What the controller sets in the engine beside the sound. */
-    val shape get() = controller.shape
+    /** What the controller sets in the engine beside the sound; the app's arps play if it lets them. */
+    val shape get() = controller.shape.let { it.copy(appArp = it.appArp && controller.arpUse == ArpUse.App) }
     /** How many parts sound: 1, a split's sections (2 to 4), or 2 layered. */
     val partCount get() = perf.partCount(shape)
     /** More than one part sounds: split by the controller, or layered. */
@@ -120,6 +126,12 @@ object AppState {
         if (!prefs.contains("ctl.${TouchPad.id}")) migrateToControllers(perfJson)
         for (c in Controllers.all) runCatching { c.load(prefs.getString("ctl.${c.id}", null)?.let { JSONObject(it) }) }
         controller = Controllers.byId(prefs.getString("controller", TouchPad.id))
+        // From 0.16 to 0.20 the arps were each controller's: the one in use brings its own into the sound.
+        if (Perf.arpsInController(perfJson)) {
+            val saved = runCatching { prefs.getString("ctl.${controller.id}", null)?.let { JSONObject(it) } }.getOrNull()
+            controller.legacyArps(saved)?.let { perf = perf.withArps(it) }
+            prefs.edit().putString("perf", perf.json().toString()).apply()
+        }
         railHidden = prefs.getBoolean("railHidden", false)
         userPresets = runCatching {
             val a = JSONArray(prefs.getString("presets", "[]"))
@@ -365,7 +377,7 @@ object AppState {
         val c = p.controller?.let { Controllers.byId(it) } ?: controller
         val full = c.save()
         p.settings?.let { s -> val o = JSONObject(s); for (k in o.keys()) full.put(k, o.get(k)) }
-        if (p.settings == null && c === TouchPad) { full.put("split", false); full.put("arp0", Arp().json()); full.put("arp1", Arp().json()) }
+        if (p.settings == null && c === TouchPad) full.put("split", false)
         val copy = p.copy(name = freeName(p.name), builtIn = false, controller = c.id, settings = full.toString())
         val at = userPresets.indexOfFirst { it.name == p.name }
         userPresets = if (at < 0) userPresets + copy else userPresets.take(at + 1) + copy + userPresets.drop(at + 1)
@@ -429,10 +441,10 @@ object AppState {
 
 /** A built-in preset for any controller: the sound only. */
 private fun preset(name: String, perf: Perf) = Preset(name, perf, builtIn = true, controller = null)
-/** A built-in touch pad preset: the sound, and the pad's split, arps and (if given) pads. */
-private fun padPreset(name: String, perf: Perf, split: Boolean = false, arps: List<Arp> = listOf(Arp(), Arp()),
+/** A built-in touch pad preset: the sound (with [arps], if given), and the pad's split and (if given) pads. */
+private fun padPreset(name: String, perf: Perf, split: Boolean = false, arps: List<Arp>? = null,
                       pads: List<PadSettings>? = null) =
-    Preset(name, perf, builtIn = true, settings = TouchPad.preset(split, arps, pads).toString())
+    Preset(name, arps?.let { perf.withArps(it) } ?: perf, builtIn = true, settings = TouchPad.preset(split, pads).toString())
 private fun two(a: Part, b: Part = Part(instrument = "voices/soprano")) = listOf(a, b)
 private fun arp(order: Int, rate: Float, gate: Float, octaves: Int = 1, latch: Boolean = false) =
     Arp(on = true, order = order, rate = rate, gate = gate, octaves = octaves, latch = latch)

@@ -282,7 +282,7 @@ fun BreathControls(r: ModReading) {
         2 -> "Notes play as usual; blowing opens the tone from dark to bright, like a wah."
         else -> "Blow across the bottom edge of the phone, where the microphone is, to shape every note."
     }, color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-    if (denied) Text("Breath needs the microphone. Allow it for MPE Instruments in Android's settings.", color = Warn, fontSize = 13.sp)
+    if (denied) Text("Breath needs the microphone. Allow it for odo in Android's settings.", color = Warn, fontSize = 13.sp)
     // On, but the permission was taken away since (or never given): say so, and offer to ask again.
     if (m.breath != 0 && !PhoneControl.forceBreath && !PhoneControl.hasMicPermission(context)) {
         Text("Breath is on but cannot hear you: it needs the microphone. Notes play as if it were off.", color = Warn, fontSize = 13.sp,

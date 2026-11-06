@@ -17,9 +17,9 @@ const val PAD_SPLIT_MIN = 0.2f
 
 /**
  * The built-in touch pad: the screen as an instrument, columns of notes, each finger its own
- * voice. Its settings: per pad the notes (size, octave, key, scale or chords), up/down, glide,
- * vibrato and the arp; split into two pads; the lock and the look. Split, each pad plays its own
- * part: left part 0, right part 1.
+ * voice. Its settings: per pad the notes (size, octave, key, scale or chords), up/down, glide
+ * and vibrato; split into two pads; the lock and the look. Split, each pad plays its own part
+ * (and the app's arp of that part): left part 0, right part 1.
  */
 object TouchPad : Controller {
     override val id = "touchpad"
@@ -37,11 +37,7 @@ object TouchPad : Controller {
     /** Where a split divides the screen, 0..1 across the playing area. */
     var splitAt by mutableStateOf(0.5f)
         private set
-    /** Each pad's arpeggiator. */
-    var arps by mutableStateOf(listOf(Arp(), Arp()))
-        private set
-
-    override val shape get() = EngineShape(split = split, arps = arps, transpose = 0, bendRange = 48f)
+    override val shape get() = EngineShape(split = split, transpose = 0, bendRange = 48f)
     override val splitNames get() = if (split) listOf("Left", "Right") else null
 
     /** Change one pad: 0 left (or the only one), 1 right. */
@@ -50,13 +46,6 @@ object TouchPad : Controller {
         if (now == pads[side]) return
         pads = pads.mapIndexed { k, p -> if (k == side) now else p }
         AppState.controllerChanged(this, engine = false)
-    }
-
-    fun updateArp(side: Int, change: (Arp) -> Arp) {
-        val now = change(arps[side])
-        if (now == arps[side]) return
-        arps = arps.mapIndexed { k, a -> if (k == side) now else a }
-        AppState.controllerChanged(this)
     }
 
     fun changeSplit(on: Boolean) {
@@ -72,18 +61,20 @@ object TouchPad : Controller {
     }
 
     override fun save(): JSONObject = JSONObject().put("left", pads[0].json()).put("right", pads[1].json())
-        .put("splitAt", splitAt.toDouble()).put("split", split).put("arp0", arps[0].json()).put("arp1", arps[1].json())
+        .put("splitAt", splitAt.toDouble()).put("split", split)
 
     override fun load(o: JSONObject?) {
         val l = PadSettings.from(o?.optJSONObject("left"))
         pads = listOf(l, PadSettings.from(o?.optJSONObject("right"), l.copy(shift = 0)))
         splitAt = (o?.optDouble("splitAt", 0.5) ?: 0.5).toFloat().coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN)
         split = o?.optBoolean("split", false) ?: false
-        arps = listOf(Arp.from(o?.optJSONObject("arp0")), Arp.from(o?.optJSONObject("arp1")))
     }
 
+    /** Until 0.21 each pad had its arp: "arp0" and "arp1". */
+    override fun legacyArps(o: JSONObject?) = o?.let { listOf(Arp.from(it.optJSONObject("arp0")), Arp.from(it.optJSONObject("arp1"))) }
+
     /**
-     * A preset: the split and the arps always come from it; its pads, if it has them (a built-in
+     * A preset: the split always comes from it; its pads, if it has them (a built-in
      * preset may not: then the pads stay as they are). The look and the lock stay as they are.
      */
     override fun loadPreset(o: JSONObject) {
@@ -96,15 +87,13 @@ object TouchPad : Controller {
             splitAt = o.optDouble("splitAt", 0.5).toFloat().coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN)
         }
         split = o.optBoolean("split", false)
-        arps = listOf(Arp.from(o.optJSONObject("arp0")), Arp.from(o.optJSONObject("arp1")))
     }
 
-    override fun clearForPreset() { split = false; arps = listOf(Arp(), Arp()) }
+    override fun clearForPreset() { split = false }
 
-    /** A preset's settings for the pad: split and arps given (off unless said), pads only if given. */
-    fun preset(split: Boolean = false, arps: List<Arp> = listOf(Arp(), Arp()), pads: List<PadSettings>? = null,
-               splitAt: Float = 0.5f): JSONObject = JSONObject().apply {
-        put("split", split); put("arp0", arps[0].json()); put("arp1", arps[1].json())
+    /** A preset's settings for the pad: the split given (off unless said), pads only if given. */
+    fun preset(split: Boolean = false, pads: List<PadSettings>? = null, splitAt: Float = 0.5f): JSONObject = JSONObject().apply {
+        put("split", split)
         if (pads != null) { put("left", pads[0].json()); put("right", pads[1].json()); put("splitAt", splitAt.toDouble()) }
     }
 

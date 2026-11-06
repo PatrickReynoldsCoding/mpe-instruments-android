@@ -68,12 +68,6 @@ fun tonnetzOptions(): List<Option> {
             Text("A triangle pointing up is a major chord, down a minor one. Slide to the next: the notes they share keep " +
                  "sounding and only the one that changes moves, the smoothest change there is.", color = TextDim, fontSize = 12.sp)
         },
-        Option("Arp", if (s.arp.on) com.patrickreynolds.mpeinstruments.ARP_ORDERS[s.arp.order] else "Off", perPart = false) {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                ArpControls(s.arp, accent) { c -> set { it.copy(arp = c(it.arp)) } }
-                TempoControls(accent)
-            }
-        },
         Option("Labels", listOf("Chords", "Notes", "None")[s.labels], perPart = false) {
             Chips(listOf("Notes and chords", "Notes", "None"), s.labels, accent) { k -> set { it.copy(labels = k) } }
             SwitchRow("Trails", s.trails, "The path each finger takes across the net", accent = accent) { v -> set { it.copy(trails = v) } }

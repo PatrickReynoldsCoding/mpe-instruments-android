@@ -33,11 +33,9 @@ object Tonnetz : Controller {
         val labels: Int = 0,          // 0 notes and chords, 1 notes, 2 none
         val litKey: Boolean = true,   // light the key's chords
         val trails: Boolean = true,   // the path a finger took across the net
-        val arp: Arp = Arp(),
     ) {
         fun json(): JSONObject = JSONObject().put("key", key).put("octave", octave).put("size", size).put("chords", chords)
             .put("bass", bass).put("strum", strum).put("labels", labels).put("litKey", litKey).put("trails", trails)
-            .put("arp", arp.json())
     }
 
     /** Strum delays between a chord's notes, ms. */
@@ -47,14 +45,13 @@ object Tonnetz : Controller {
     var settings by mutableStateOf(Settings())
         private set
 
-    override val shape get() = EngineShape(arps = listOf(settings.arp, Arp()), transpose = 0, bendRange = 48f)
+    override val shape get() = EngineShape(transpose = 0, bendRange = 48f)
 
     fun update(change: (Settings) -> Settings) {
         val now = change(settings)
         if (now == settings) return
-        val engine = now.arp != settings.arp
         settings = now
-        AppState.controllerChanged(this, engine)
+        AppState.controllerChanged(this, engine = false)
     }
 
     override fun save() = settings.json()
@@ -65,11 +62,11 @@ object Tonnetz : Controller {
             o.optInt("key", d.key).coerceIn(0, 11), o.optInt("octave", d.octave).coerceIn(-3, 3),
             o.optInt("size", d.size).coerceIn(SIZES.first, SIZES.last), o.optInt("chords", d.chords).coerceIn(0, 1),
             o.optBoolean("bass", d.bass), o.optInt("strum", d.strum).coerceIn(STRUMS.indices), o.optInt("labels", d.labels).coerceIn(0, 2),
-            o.optBoolean("litKey", d.litKey), o.optBoolean("trails", d.trails), Arp.from(o.optJSONObject("arp")))
+            o.optBoolean("litKey", d.litKey), o.optBoolean("trails", d.trails))
     }
 
-    /** A preset that says nothing of the Tonnetz: no arp. */
-    override fun clearForPreset() { settings = settings.copy(arp = Arp()) }
+    /** Until 0.21 the Tonnetz had its own arp, for its one part. */
+    override fun legacyArps(o: JSONObject?) = o?.optJSONObject("arp")?.let { listOf(Arp.from(it)) }
 
     @Composable
     override fun options(part: Int) = tonnetzOptions()

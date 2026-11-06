@@ -95,7 +95,7 @@ pad's Breath panel) fills. Note the two numbers under the meter, "room" and "sta
 
 0.5.0 is the first version that can update itself, so install it by hand once. When the next
 release is out, the Play tab says so. Setup → Updates → **Update to …**. The first time,
-Android sends you to "Install unknown apps" for MPE Instruments: turn it on and come back, and the
+Android sends you to "Install unknown apps" for odo: turn it on and come back, and the
 install carries on. Xiaomi phones may show their own scan screen first. The app closes while
 Android replaces it; reopen it and check the version at the bottom of Setup. Your presets and
 settings must still be there.

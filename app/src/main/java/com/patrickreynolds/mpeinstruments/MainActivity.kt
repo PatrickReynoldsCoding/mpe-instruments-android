@@ -185,7 +185,7 @@ class MainActivity : ComponentActivity() {
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Ink),
                     title = {
                         Column {
-                            Text(AppState.presetName.ifEmpty { "MPE Instruments" }, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+                            Text(AppState.presetName.ifEmpty { "odo" }, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
                             Status(stats, tick)
                         }
                     },

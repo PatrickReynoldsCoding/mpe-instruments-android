@@ -3,7 +3,10 @@ package com.patrickreynolds.mpeinstruments
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/** The arpeggiator of one part: a touch pad setting (the pad sends it to the engine). Mirrors mpe::ArpConfig. */
+/**
+ * The arpeggiator of one part: a modifier of the app's, so it works with every controller that
+ * lets it (Controller.arpUse). Kept in the part, so it goes with the sound into presets. Mirrors mpe::ArpConfig.
+ */
 data class Arp(
     val on: Boolean = false,
     val order: Int = 0,            // ArpOrder: 0 up, 1 down, 2 up-down, 3 as played, 4 random, 5 chord
@@ -25,7 +28,7 @@ data class Arp(
     }
 }
 
-/** One part, a sound: mirrors mpe::PartConfig, but for the arp, which the controller brings. */
+/** One part, a sound and its arp: mirrors mpe::PartConfig. */
 data class Part(
     val instrument: String = "strings/cello",
     val transpose: Int = 0,
@@ -36,12 +39,13 @@ data class Part(
     val reverb: Float = 0.15f,
     val delay: Float = 0f,
     val release: Float = 0f,       // s the note plays on and fades after the finger lifts; 0 = the instrument's own
+    val arp: Arp = Arp(),
 ) {
     fun json() = JSONObject().apply {
         put("instrument", instrument); put("transpose", transpose)
         put("volume", volume.toDouble()); put("brightness", brightness.toDouble()); put("drive", drive.toDouble())
         put("pressureCurve", pressureCurve.toDouble()); put("reverb", reverb.toDouble()); put("delay", delay.toDouble())
-        put("release", release.toDouble())
+        put("release", release.toDouble()); put("arpeggio", arp.json())
     }
 
     companion object {
@@ -50,19 +54,22 @@ data class Part(
             o.optDouble("volume", d.volume.toDouble()).toFloat(), o.optDouble("brightness", d.brightness.toDouble()).toFloat(),
             o.optDouble("drive", d.drive.toDouble()).toFloat(), o.optDouble("pressureCurve", d.pressureCurve.toDouble()).toFloat(),
             o.optDouble("reverb", d.reverb.toDouble()).toFloat(), o.optDouble("delay", d.delay.toDouble()).toFloat(),
-            o.optDouble("release", d.release.toDouble()).toFloat().coerceIn(0f, RELEASE_MAX))
+            o.optDouble("release", d.release.toDouble()).toFloat().coerceIn(0f, RELEASE_MAX),
+            // Before 0.16 the arp was in the part itself; from 0.16 to 0.20 in the controller (Controller.legacyArps).
+            o.optJSONObject("arpeggio")?.let { Arp.from(it) } ?: Arp.from(o))
     }
 }
 
 /**
  * What the controller in use sets in the engine, beside the sound: a split (two parts, each
- * finger told its part), each part's arp, pitch assist, transpose and the pitch bend range of
- * the notes it sends.
+ * finger told its part), whether the app's arps play, pitch assist, transpose and the pitch
+ * bend range of the notes it sends.
  */
 data class EngineShape(
     val split: Boolean = false,
     val parts: Int = 2,            // split: how many parts (sounds) it divides between, 2..PARTS
-    val arps: List<Arp> = listOf(Arp(), Arp()),
+    val appArp: Boolean = true,    // the app's arps play (Controller.arpUse is App)
+    val arpLatch: Boolean = true,  // an arp may latch (the grid latches notes itself, so not there)
     val scale: Int = 0,            // pitch assist: index into SCALES; 0 = off
     val scaleRoot: Int = 0,
     val assist: Float = 0.6f,
@@ -104,8 +111,12 @@ data class Perf(
         a[6] = reverbSize; a[7] = reverbDamp; a[8] = delayBeats; a[9] = delayFeedback; a[10] = if (delayPingPong) 1f else 0f
         for (k in 0 until PARTS) {
             val p = part(k)
-            // Layered on one pad: both parts arpeggiate as the pad does.
-            val r = if (layout == 2) shape.arps[0] else shape.arps.getOrElse(k) { Arp() }
+            // Layered, every note plays both parts: both arpeggiate as the main one does.
+            val r = when {
+                !shape.appArp -> Arp()
+                layout == 2 -> part(0).arp
+                else -> p.arp
+            }.let { if (shape.arpLatch) it else it.copy(latch = false) }
             val b = 11 + 14 * k
             a[b] = if (r.on) 1f else 0f; a[b + 1] = r.order.toFloat(); a[b + 2] = r.rate; a[b + 3] = r.gate
             a[b + 4] = r.octaves.toFloat(); a[b + 5] = if (r.latch) 1f else 0f; a[b + 6] = p.transpose.toFloat()
@@ -119,10 +130,17 @@ data class Perf(
         put("layered", layered); put("bpm", bpm.toDouble()); put("reverbSize", reverbSize.toDouble())
         put("reverbDamp", reverbDamp.toDouble()); put("delayBeats", delayBeats.toDouble())
         put("delayFeedback", delayFeedback.toDouble()); put("delayPingPong", delayPingPong)
+        put("v", 2)                // 2: the arps are in the parts (0.21)
         for (k in 0 until PARTS) put("part$k", part(k).json())
     }
 
+    /** Each part's arp from [arps] (a controller's of before 0.21), the rest off. */
+    fun withArps(arps: List<Arp>) = copy(parts = List(PARTS) { k -> part(k).copy(arp = arps.getOrElse(k) { Arp() }) })
+
     companion object {
+        /** Saved before 0.21, when (from 0.16) the arps were the controller's: see Controller.legacyArps. */
+        fun arpsInController(o: JSONObject?) = o != null && o.optInt("v", 1) < 2 && !o.has("layout")
+
         /** The sounds a part starts with: the main one, the layer (or right of a split), then a grid's third and fourth sections. */
         val DEFAULT_PARTS = listOf(Part(), Part(instrument = "voices/soprano"), Part(instrument = "plucked/bass-guitar"),
                                    Part(instrument = "keys/rhodes"))

@@ -5,6 +5,6 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories { google(); mavenCentral() }
 }
-rootProject.name = "mpe-instruments-android"
+rootProject.name = "odo"
 include(":app")
 include(":fakeseaboard")

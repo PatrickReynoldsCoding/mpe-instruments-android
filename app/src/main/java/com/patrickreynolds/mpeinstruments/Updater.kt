@@ -32,7 +32,7 @@ import java.util.concurrent.Executors
  * app to install apps). The only network access the app has is this, to GitHub.
  */
 object Updater {
-    const val REPO = "PatrickReynoldsCoding/mpe-instruments-android"
+    const val REPO = "PatrickReynoldsCoding/odo"
     private const val TAG = "mpe"
     private const val DAY_MS = 20L * 60 * 60 * 1000          // "once a day", with some slack
 
@@ -99,7 +99,7 @@ object Updater {
         val c = URL("https://api.github.com/repos/$REPO/releases/latest").openConnection() as HttpURLConnection
         c.connectTimeout = 10_000; c.readTimeout = 15_000
         c.setRequestProperty("Accept", "application/vnd.github+json")
-        c.setRequestProperty("User-Agent", "MPE-Instruments/${BuildConfig.VERSION_NAME}")
+        c.setRequestProperty("User-Agent", "odo/${BuildConfig.VERSION_NAME}")
         try {
             if (c.responseCode == 404) return null                     // no release yet
             if (c.responseCode != 200) throw IllegalStateException("GitHub answered ${c.responseCode}")
@@ -162,7 +162,7 @@ object Updater {
     private fun download(r: Release, to: File) {
         val c = URL(r.apkUrl).openConnection() as HttpURLConnection   // follows GitHub's redirect to its file host
         c.connectTimeout = 15_000; c.readTimeout = 30_000
-        c.setRequestProperty("User-Agent", "MPE-Instruments/${BuildConfig.VERSION_NAME}")
+        c.setRequestProperty("User-Agent", "odo/${BuildConfig.VERSION_NAME}")
         try {
             if (c.responseCode != 200) throw IllegalStateException("Download failed: GitHub answered ${c.responseCode}")
             val total = c.contentLengthLong.takeIf { it > 0 } ?: r.size
@@ -269,7 +269,7 @@ class UpdatedReceiver : BroadcastReceiver() {
         val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         nm.notify(2, Notification.Builder(context, "updates")
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("MPE Instruments updated to ${BuildConfig.VERSION_NAME}")
+            .setContentTitle("odo updated to ${BuildConfig.VERSION_NAME}")
             .setContentText("Tap to open")
             .setContentIntent(open)
             .setAutoCancel(true)

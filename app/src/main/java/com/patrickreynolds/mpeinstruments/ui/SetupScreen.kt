@@ -60,7 +60,7 @@ fun SetupScreen(stats: Stats?, actions: SetupActions, @Suppress("UNUSED_PARAMETE
                    colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = Danger), border = ButtonEdge) {
                 Text("Stop: sound and controller off until you open the app")
             }
-            Text("MPE Instruments ${BuildConfig.VERSION_NAME}", color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+            Text("odo ${BuildConfig.VERSION_NAME}", color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
         }
     }
 }

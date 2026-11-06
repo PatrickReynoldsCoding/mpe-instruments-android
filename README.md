@@ -1,6 +1,6 @@
-# mpe-instruments-android
+# odo
 
-An Android app that plays the Faust instruments from `mpe-instruments` from a
+odo is a [MESH](MESH.md) (Multimodal Expression Sensor Host) for Android: an app that plays the Faust instruments from `mpe-instruments` from a
 Seaboard BLOCK (or any MPE controller) over USB or Bluetooth LE, with low latency: about
 25 ms from note to sound on a POCO F2 Pro, measured ([LATENCY.md](LATENCY.md)).
 
@@ -46,7 +46,7 @@ What it does:
 - **Updates from inside the app** (Setup → Updates): it asks GitHub for the latest release when
   it opens (at most once a day; can be turned off), downloads the APK, checks that it is this app,
   newer, and signed with the same key, and hands it to Android, which asks you to confirm. The
-  first time, Android also asks you to allow MPE Instruments to install apps. GitHub is the only
+  first time, Android also asks you to allow odo to install apps. GitHub is the only
   place the app ever connects to.
 - Bluetooth reconnects by itself (can be turned off); Stop turns everything off.
 
@@ -56,7 +56,7 @@ USB. Bluetooth with the real Seaboard is not tested yet.
 
 ## Install
 
-Download `MPE-Instruments-<version>.apk` from the [Releases](../../releases) page on the phone and
+Download `odo-<version>.apk` (`MPE-Instruments-<version>.apk` up to 0.20.0) from the [Releases](../../releases) page on the phone and
 open it (allow installing from your browser or file manager when Android asks). Android 12 or
 newer.
 
@@ -78,8 +78,8 @@ To try the updater, build an older-numbered release copy, install it, and update
 
 Engine, on the desktop (needs `cmake`, a C++17 compiler, and `faust`):
 
-    git clone --recurse-submodules https://github.com/PatrickReynoldsCoding/mpe-instruments-android
-    cd mpe-instruments-android/engine
+    git clone --recurse-submodules https://github.com/PatrickReynoldsCoding/odo
+    cd odo/engine
     cmake -S . -B build && cmake --build build -j && (cd build && ctest --output-on-failure)
     ./build/tools/bench 8 96 3        # cost of 8 fingers, 96-frame callbacks
 
