@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -64,6 +65,7 @@ import com.patrickreynolds.mpeinstruments.PhoneControl
 import com.patrickreynolds.mpeinstruments.PhoneMods
 import com.patrickreynolds.mpeinstruments.SCALES
 import com.patrickreynolds.mpeinstruments.ARP_ORDERS
+import com.patrickreynolds.mpeinstruments.Chords
 import com.patrickreynolds.mpeinstruments.releaseName
 import com.patrickreynolds.mpeinstruments.noteName
 import kotlin.math.abs
@@ -88,8 +90,6 @@ fun PadScreen(onClose: () -> Unit) {
     val split = AppState.perf.layout == 1
     val side = if (split) AppState.padSide.coerceIn(0, 1) else 0
     val theme = padTheme(AppState.pad)
-    pad.layout(AppState.pads, split, AppState.padSplitAt, FloatArray(2) { AppState.instrument(it)?.centerNote ?: 60f },
-               BooleanArray(2) { AppState.instrument(it)?.group == "drums" }, theme)
     pad.hudStack = AppState.loopDock
     DisposableEffect(Unit) { onDispose { pad.releaseAll() } }
     LoopTicker()
@@ -107,7 +107,10 @@ fun PadScreen(onClose: () -> Unit) {
     Box(Modifier.fillMaxSize().background(theme.bottom)) {
       Row(Modifier.fillMaxSize()) {
         if (railShown) Rail(side, split, theme, panel, { panel = if (panel == it) null else it }, onClose)
-        Box(Modifier.weight(1f).fillMaxHeight()) {
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
+        pad.widthDp = maxWidth.value
+        pad.layout(AppState.pads, split, AppState.padSplitAt, FloatArray(2) { AppState.instrument(it)?.centerNote ?: 60f },
+                   BooleanArray(2) { AppState.instrument(it)?.group == "drums" }, theme)
         Canvas(Modifier.fillMaxSize().systemGestureExclusion()
             .pointerInput(Unit) {
                 awaitPointerEventScope {
@@ -134,6 +137,15 @@ fun PadScreen(onClose: () -> Unit) {
             frame.let { }                                     // redraw every frame
             pad.draw(this, STRIP.toPx())
         }
+        // The chord pickers, over the left part of each pad in a chord mode.
+        for (k in 0 until (if (split) 2 else 1)) {
+            val ps = AppState.pads[k]
+            val drums = AppState.instrument(k)?.group == "drums"
+            val (a, b) = if (!split) 0f to 1f else if (k == 0) 0f to AppState.padSplitAt else AppState.padSplitAt to 1f
+            val f = pickerFrac(ps, drums, (b - a) * maxWidth.value)
+            if (f > 0f) ChordPicker(k, ps, theme, Modifier.offset(x = maxWidth * a).width(maxWidth * (b - a) * f)
+                                                        .height(maxHeight - STRIP))
+        }
         if (AppState.loopDock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
         }
       }
@@ -154,6 +166,16 @@ private val DRUM_ORDER = listOf(36, 38, 42, 46, 39, 37, 44, 40, 41, 43, 45, 47)
 private val DRUM_NAMES = mapOf(0 to "Kick", 1 to "Rim", 2 to "Snare", 3 to "Clap", 4 to "Crash", 5 to "Tom 1", 6 to "Hat",
                                7 to "Tom 2", 8 to "Pedal", 9 to "Tom 3", 10 to "Open", 11 to "Bell")
 private fun drumName(n: Int) = DRUM_NAMES[((n % 12) + 12) % 12] ?: ""
+
+/**
+ * How much of a pad (0..1 across it) a chord picker takes: the wheel about 230 dp, the grid about
+ * 290 dp, but never more than 60% of the pad; nothing in scale mode or for a drum kit.
+ */
+fun pickerFrac(s: PadSettings, drums: Boolean, padWidthDp: Float): Float {
+    if (drums || s.chordMode == 0 || padWidthDp <= 0f) return 0f
+    val want = if (s.chordMode == 1) 230f else 290f
+    return (want / padWidthDp).coerceAtMost(0.6f)
+}
 
 /** Height of the note strip along the bottom: drag it sideways to move the notes. */
 private val STRIP = 64.dp
@@ -200,7 +222,7 @@ private fun Rail(side: Int, split: Boolean, t: PadTheme, open: String?, pick: (S
             "Size" to "${s.size}",
             "Octave" to (if (s.octave == 0) "0" else "%+d".format(s.octave)),
             "Key" to NOTE_NAMES[s.key],
-            "Scale" to (if (s.scale == 0) "All notes" else SCALES[s.scale].name),
+            "Scale" to when (s.chordMode) { 1 -> "Wheel"; 2 -> "Grid"; else -> if (s.scale == 0) "All notes" else SCALES[s.scale].name },
             "Up/down" to PadSettings.VERTICAL[s.vertical],
             "Glide" to PadSettings.glideName(s.glide),
             "Vibrato" to PadSettings.VIBRATO[s.vibrato],
@@ -340,8 +362,20 @@ private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, 
                         Text("Move the notes back (%+d)".format(s.shift)) }
                 }
                 "Key" -> Chips(NOTE_NAMES, s.key, accent) { k -> set { it.copy(key = k) } }
-                "Scale" -> Chips(SCALES.map { if (it.mask == 0) "All notes" else it.name }, s.scale, accent) { k ->
-                    set { it.copy(scale = k) } }
+                "Scale" -> Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("The pad's notes", color = TextDim, fontSize = 13.sp)
+                    Chips(listOf("A scale", "Chord wheel", "Chord grid"), s.chordMode, accent) { k -> set { it.copy(chordMode = k, shift = 0) } }
+                    if (s.chordMode == 0) {
+                        Text("Scale", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                        Chips(SCALES.map { if (it.mask == 0) "All notes" else it.name }, s.scale, accent) { k -> set { it.copy(scale = k) } }
+                    } else Text(if (s.chordMode == 1)
+                        "The left of the pad is a circle of fifths: tap a chord and the pad holds only its notes. The outer ring is " +
+                        "major chords, the middle their relative minors, the inner diminished; hold a ring to change what it plays. " +
+                        "The buttons under the wheel add a 7th, 9th, 6th..."
+                        else "The left of the pad is a grid of chords: the roots across, a chord type in each row. Tap one and the pad " +
+                        "holds only its notes. Hold a row's name to change its chord type.", color = TextDim, fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 6.dp))
+                }
                 "Up/down" -> {
                     Chips(PadSettings.VERTICAL, s.vertical, accent) { k -> set { it.copy(vertical = k) } }
                     Text(when (s.vertical) {
@@ -440,7 +474,9 @@ private class Pad {
     class Zone(val part: Int) {
         var s = PadSettings()
         var drums = false                          // a drum kit: each column is a drum, struck, not pitched
+        var start = 0f                             // where the pad begins; its notes begin at x0, after a chord picker
         var x0 = 0f; var x1 = 1f
+        val chords get() = s.chordMode != 0 && !drums
         var columns = IntArray(8) { 60 + it }      // sounding note of each column
         var shiftRange = 0..0
         val w get() = (x1 - x0).coerceAtLeast(1e-3f)
@@ -453,6 +489,11 @@ private class Pad {
             if (drums) {                           // the kit's drums, most used first; Size picks how many
                 columns = DRUM_ORDER.take(s.size.coerceIn(4, DRUM_ORDER.size)).toIntArray()
                 shiftRange = 0..0
+                return
+            }
+            if (s.chordMode != 0) {                // a chord's notes only; the strip moves them by chord notes
+                columns = Chords.columns(s.chordRoot, s.chord, center + 12 * s.octave, s.size, s.shift)
+                shiftRange = -24..24
                 return
             }
             val mask = SCALES[s.scale].mask.takeIf { it != 0 } ?: 0xFFF
@@ -515,15 +556,16 @@ private class Pad {
         val x1 = if (split) at else 1f
         for ((k, z) in zones.withIndex()) {
             val (a, b) = if (k == 0) 0f to x1 else x1 to 1f
-            if (z.s != pads[k] || z.x0 != a || z.x1 != b || z.drums != drums[k]) dirty = true
-            z.x0 = a; z.x1 = b
+            val notesAt = a + pickerFrac(pads[k], drums[k], (b - a) * widthDp) * (b - a)
+            if (z.s != pads[k] || z.x0 != notesAt || z.x1 != b || z.drums != drums[k]) dirty = true
+            z.start = a; z.x0 = notesAt; z.x1 = b
             z.set(pads[k], centers[k], drums[k])
         }
         if (t !== theme || split != this.split) dirty = true
         this.split = split; theme = t
     }
 
-    private fun zoneAt(x: Float) = if (split && x >= zones[1].x0) 1 else 0
+    private fun zoneAt(x: Float) = if (split && x >= zones[1].start) 1 else 0
 
     /** x (0..1 across a pad) to sounding pitch, for a glide amount g (0 snap .. 1 free). */
     private fun pitchAt(cols: IntArray, x: Float, g: Float): Float {
@@ -600,7 +642,7 @@ private class Pad {
      */
     fun stripDown(id: Long, x: Float, y: Float) {
         if (main.locked) { down(id, x, y); return }
-        if (split && abs(x - zones[1].x0) * widthDp < DIVIDE_GRAB_DP) { divider = id; dirty = true; return }
+        if (split && abs(x - zones[1].start) * widthDp < DIVIDE_GRAB_DP) { divider = id; dirty = true; return }
         val zi = zoneAt(x)
         if (zones[zi].drums) { down(id, x, y); return }       // a kit has nothing to move: the strip plays
         grabs[id] = Grab(zi, x, zones[zi].s.shift); dirty = true
@@ -715,7 +757,11 @@ private class Pad {
     /** A pad's colour: its part's. */
     private fun colorOf(zone: Int) = theme.parts[zones.getOrNull(zone)?.part ?: 0]
 
-    private fun isRoot(z: Zone, n: Int) = if (z.drums) n % 12 == 0 else ((n - z.s.key) % 12 + 12) % 12 == 0
+    private fun isRoot(z: Zone, n: Int) = when {
+        z.drums -> n % 12 == 0
+        z.chords -> ((n - z.s.chordRoot) % 12 + 12) % 12 == 0
+        else -> ((n - z.s.key) % 12 + 12) % 12 == 0
+    }
 
     /** Where a pitch is across a pad (0..1): a kit's drum is wherever its column is. */
     private fun xAt(z: Zone, pitch: Float): Float {
@@ -759,7 +805,7 @@ private class Pad {
             }
             drawStrip(this, z, zi, strip, cw, held[zi])
         }
-        if (split) drawDivide(this, zones[1].x0 * w, strip)
+        if (split) drawDivide(this, zones[1].start * w, strip)
         // Breath: a glow rising from the bottom as you blow (on e-ink a bar along the bottom).
         if (modsOn.breath != 0 && mod.breath > 0.01f) {
             val b = mod.breath
@@ -827,8 +873,10 @@ private class Pad {
         if (items == 0) return@with
         val t = theme
         val iw = 176.dp.toPx(); val ih = 52.dp.toPx(); val gap = 10.dp.toPx(); var top = 8.dp.toPx(); val rr = 14.dp.toPx()
-        // Centred along the top; with the loop buttons at the top right, stacked at the top left.
-        var x0 = if (hudStack) 12.dp.toPx() else (size.width - items * iw - (items - 1) * gap) / 2
+        // Centred along the top; with the loop buttons at the top right, at the bottom left instead,
+        // just above the note strip (clear of a chord picker), stacked upwards.
+        var x0 = if (hudStack) zones[0].x0 * size.width + 12.dp.toPx() else (size.width - items * iw - (items - 1) * gap) / 2
+        if (hudStack) top = playH - ih - 10.dp.toPx()
         val canvas = drawContext.canvas.nativeCanvas
         val text = android.graphics.Paint().apply { isAntiAlias = true; color = t.label.toArgb() }
         val ink = if (t.flat) Color.Black else t.label
@@ -863,7 +911,7 @@ private class Pad {
             val effect = gyroEffect(modsOn, mod)
             label(if (mod.held || t.flat) effect.ifEmpty { "move to play" } else "move to play", tx, top + 39.dp.toPx(), 13f, mod.held,
                   if (mod.held) 1f else 0.6f)
-            if (hudStack) top += ih + gap else x0 += iw + gap
+            if (hudStack) top -= ih + gap else x0 += iw + gap
         }
         if (modsOn.breath != 0) {
             box()

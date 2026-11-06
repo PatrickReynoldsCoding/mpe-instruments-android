@@ -121,12 +121,26 @@ data class PadSettings(
     val vibSense: Int = 1,         // how small a wiggle makes the full vibrato: index into VIB_SENSE
     val fade: Int = 2,             // how much of the bottom of the pad fades to silence: index into FADE
     val hideRail: Boolean = false, // the settings rail is tucked away (the screen as a whole: left pad only)
+    // Chord modes: instead of a scale, the pad holds only the notes of one chord, picked on a chord
+    // wheel (circle of fifths) or a chord grid that takes the left part of the pad.
+    val chordMode: Int = 0,        // 0 a scale, 1 the chord wheel, 2 the chord grid
+    val chordRoot: Int = 0,        // the chord in hand: its root (0 = C) ..
+    val chordType: String = "maj", // .. and type (Chords.TYPES)
+    val chordMod: String = "",     // a quick change on top (Chords.MODS), from the wheel
+    val wheelRings: List<String> = listOf("maj", "min", "dim"),   // outer, middle, inner ring: each ring's chord type
+    val wheelAlign: List<Int> = listOf(0, 9, 11),                 // each ring's roots, in semitones from the outer ring's
+    val gridRows: List<String> = listOf("maj", "min", "7", "maj7", "m7", "sus4", "dim"),
 ) {
+    /** The chord the pad plays now. */
+    val chord get() = Chords.modify(chordType, chordMod)
     fun json() = JSONObject().apply {
         put("size", size); put("octave", octave); put("key", key); put("scale", scale)
         put("vertical", vertical); put("glide", glide.toDouble()); put("shift", shift); put("locked", locked)
         put("theme", theme); put("lines", lines); put("vibrato", vibrato)
         put("vibSense", vibSense); put("fade", fade); put("hideRail", hideRail)
+        put("chordMode", chordMode); put("chordRoot", chordRoot); put("chordType", chordType); put("chordMod", chordMod)
+        put("wheelRings", org.json.JSONArray(wheelRings)); put("wheelAlign", org.json.JSONArray(wheelAlign))
+        put("gridRows", org.json.JSONArray(gridRows))
     }
 
     companion object {
@@ -152,7 +166,16 @@ data class PadSettings(
             o.optInt("theme", d.theme).coerceIn(0, 9), o.optInt("lines", d.lines).coerceIn(0, 2),
             o.optInt("vibrato", d.vibrato).coerceIn(VIBRATO.indices),
             o.optInt("vibSense", d.vibSense).coerceIn(VIB_SENSE.indices), o.optInt("fade", d.fade).coerceIn(FADE.indices),
-            o.optBoolean("hideRail", d.hideRail))
+            o.optBoolean("hideRail", d.hideRail),
+            o.optInt("chordMode", d.chordMode).coerceIn(0, 2), o.optInt("chordRoot", d.chordRoot).coerceIn(0, 11),
+            o.optString("chordType", d.chordType).takeIf { it in Chords.TYPES } ?: d.chordType,
+            o.optString("chordMod", d.chordMod).takeIf { it in Chords.MODS } ?: "",
+            strings(o.optJSONArray("wheelRings"), d.wheelRings), ints(o.optJSONArray("wheelAlign"), d.wheelAlign),
+            strings(o.optJSONArray("gridRows"), d.gridRows))
+        private fun strings(a: org.json.JSONArray?, d: List<String>) =
+            if (a == null || a.length() != d.size) d else List(d.size) { k -> a.optString(k).takeIf { it in Chords.TYPES } ?: d[k] }
+        private fun ints(a: org.json.JSONArray?, d: List<Int>) =
+            if (a == null || a.length() != d.size) d else List(d.size) { k -> ((a.optInt(k, d[k]) % 12) + 12) % 12 }
     }
 }
 
