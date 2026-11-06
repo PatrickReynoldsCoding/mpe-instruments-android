@@ -25,6 +25,7 @@ object KeyGrid : Controller {
     override val name = "Grid"
     override val description = "Square keys, upright: the notes climb row by row; drag to bend toward the next, wiggle for vibrato"
     override val landscape = false
+    override val upright = true
 
     /** What moving a held square along an axis changes. */
     val TARGETS = listOf("Nothing", "Loudness", "Tone", "Bend", "Volume")
@@ -42,12 +43,24 @@ object KeyGrid : Controller {
         val vibrato: Int = 2,           // index into PadSettings.VIBRATO
         val labels: Boolean = false,    // the root is marked either way
         val arp: Arp = Arp(),
+        val leftHanded: Boolean = false,// the notes climb right to left along each row
+        val theme: Int = 0,             // index into GRID_THEMES (ui/GridUi.kt)
+        val squareSize: Float = 1f,     // the grid's size, as a share of the largest that fits (SIZES)
+        val spacing: Float = 0.09f,     // the gap between squares, as a share of each square's space (SPACINGS)
     ) {
         fun json(): JSONObject = JSONObject().put("rows", rows).put("cols", cols).put("key", key).put("scale", scale)
             .put("chromatic", chromatic).put("octave", octave).put("xTarget", xTarget).put("yTarget", yTarget)
             .put("vibrato", vibrato).put("labels", labels).put("arp", arp.json()).put("v", 2)
+            .put("leftHanded", leftHanded).put("theme", theme)
+            .put("squareSize", squareSize.toDouble()).put("spacing", spacing.toDouble())
     }
 
+    /**
+     * The limits keep the grid whole: never bigger than fits the screen (so no square leaves it),
+     * and a gap that never reaches a square's whole space (so squares never overlap or vanish).
+     */
+    val SIZES = 0.5f..1f
+    val SPACINGS = 0.02f..0.3f
     val ROWS = 1..10
     val COLS = 2..8
 
@@ -74,7 +87,10 @@ object KeyGrid : Controller {
             o.optInt("key", d.key).coerceIn(0, 11), o.optInt("scale", d.scale).coerceIn(SCALES.indices),
             o.optBoolean("chromatic", d.chromatic), o.optInt("octave", d.octave).coerceIn(-3, 3),
             o.optInt("xTarget", d.xTarget).coerceIn(TARGETS.indices), o.optInt("yTarget", d.yTarget).coerceIn(TARGETS.indices),
-            o.optInt("vibrato", d.vibrato).coerceIn(0, 3), o.optBoolean("labels", d.labels), Arp.from(o.optJSONObject("arp")))
+            o.optInt("vibrato", d.vibrato).coerceIn(0, 3), o.optBoolean("labels", d.labels), Arp.from(o.optJSONObject("arp")),
+            o.optBoolean("leftHanded", d.leftHanded), o.optInt("theme", d.theme).coerceAtLeast(0),
+            o.optDouble("squareSize", d.squareSize.toDouble()).toFloat().coerceIn(SIZES),
+            o.optDouble("spacing", d.spacing.toDouble()).toFloat().coerceIn(SPACINGS))
     }
 
     override fun clearForPreset() { settings = settings.copy(arp = Arp()) }

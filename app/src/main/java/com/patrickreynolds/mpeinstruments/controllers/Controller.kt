@@ -22,6 +22,9 @@ interface Controller {
     /** The play surface wants the screen on its side (the touch pad), or either way up. */
     val landscape: Boolean
 
+    /** The play surface is upright and stays so: the screen does not turn with the phone (the Grid). */
+    val upright: Boolean get() = false
+
     /** What it sets in the engine beside the sound: a split, the arps, pitch assist, transpose. */
     val shape: EngineShape
 

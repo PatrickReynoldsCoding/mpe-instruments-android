@@ -75,7 +75,8 @@ fun PlayScreen(stats: Stats?, openPlay: () -> Unit, openSetup: () -> Unit) {
                              color = if (on) PartColors[0] else Color.Unspecified)
                         Text(c.description, color = TextDim, fontSize = 12.sp)
                     }
-                    Text(if (on) "In use" else "Use", color = if (on) TextDim else PartColors[0], fontSize = 13.sp)
+                    Text(if (on) "In use" else "Use", color = if (on) TextDim else PartColors[0], fontSize = 13.sp,
+                         modifier = Modifier.padding(start = 12.dp))
                 }
             }
             Text("Built in. Each keeps its own settings; the sound, effects, loops and presets are shared.",
@@ -120,7 +121,8 @@ private fun ControllerCard(open: () -> Unit) {
             Column(Modifier.align(Alignment.CenterStart).padding(20.dp)) {
                 Text(c.name, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
                 Text(if (c === com.patrickreynolds.mpeinstruments.controllers.ExternalMidi) MidiConnector.connectedName.ifEmpty { "Nothing connected yet" }
-                     else if (pad) "Play with your fingers, full screen" else c.description, color = TextDim, fontSize = 13.sp, maxLines = 2)
+                     else if (pad) "Play with your fingers, full screen" else c.description, color = TextDim, fontSize = 13.sp, maxLines = 1,
+                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(end = 8.dp))
                 Spacer(Modifier.height(10.dp))
                 Button(onClick = open, colors = ButtonDefaults.buttonColors(containerColor = PartColors[0], contentColor = Ink)) {
                     Text("Play")

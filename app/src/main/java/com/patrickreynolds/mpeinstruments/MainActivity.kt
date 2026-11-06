@@ -130,8 +130,11 @@ class MainActivity : ComponentActivity() {
         padOpen = open
         val bars = WindowCompat.getInsetsController(window, window.decorView)
         if (open) {
-            requestedOrientation = if (AppState.controller.landscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                                   else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            requestedOrientation = when {
+                AppState.controller.landscape -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                AppState.controller.upright -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
             bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             bars.hide(WindowInsetsCompat.Type.systemBars())
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -161,8 +164,11 @@ class MainActivity : ComponentActivity() {
             val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
                 android.content.res.Configuration.ORIENTATION_LANDSCAPE
             val wantsSide = AppState.controller.landscape
-            LaunchedEffect(AppState.mods.gyroOn, landscape, wantsSide) {
+            val upright = AppState.controller.upright
+            LaunchedEffect(AppState.mods.gyroOn, landscape, wantsSide, upright) {
                 requestedOrientation = when {
+                    // The Grid's squares never turn: only the rail's labels follow the phone (PlayHost).
+                    upright -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     AppState.mods.gyroOn && (landscape || !wantsSide) -> ActivityInfo.SCREEN_ORIENTATION_LOCKED
                     wantsSide -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED

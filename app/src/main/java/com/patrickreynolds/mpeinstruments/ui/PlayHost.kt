@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -181,21 +182,26 @@ private fun Rail(pick: Option, own: List<Option>, shared: List<Option>, t: PadTh
             IconButton(onClick = { AppState.changeRailHidden(true) }, Modifier.size(44.dp)) {
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Hide the settings", tint = t.railDim) }
         }
-        RailItem(pick, open == pick.label, t, accent, tap)
+        // An upright controller keeps the screen still: turn the phone and only the labels turn, to stay readable.
+        val turn = if (AppState.controller.upright) rememberPhoneTurn() else 0f
+        RailItem(pick, open == pick.label, t, accent, tap, turn)
         if (AppState.twoParts) PartToggle(AppState.controller.splitNames ?: listOf("Main", "Layer"), t)
-        for (o in own) RailItem(o, open == o.label, t, accent, tap)
+        for (o in own) RailItem(o, open == o.label, t, accent, tap, turn)
         Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(1.dp).background(t.railDim.copy(alpha = 0.4f)))
-        for (o in shared) RailItem(o, open == o.label, t, accent, tap)
+        for (o in shared) RailItem(o, open == o.label, t, accent, tap, turn)
     }
 }
 
 @Composable
-private fun RailItem(o: Option, open: Boolean, t: PadTheme, accent: Color, tap: (String) -> Unit) {
+private fun RailItem(o: Option, open: Boolean, t: PadTheme, accent: Color, tap: (String) -> Unit, turn: Float = 0f) {
     val on = open || o.on
+    // Turned, each item gets a square of its own, so the turned words do not run into the next.
     Column(Modifier.clickable { o.tap?.invoke() ?: tap(o.label) }
                .then(if (on && t.flat) Modifier.background(Color.Black) else Modifier)
+               .then(if (turn != 0f) Modifier.size(86.dp).rotate(turn) else Modifier)
                .padding(horizontal = 4.dp, vertical = 2.dp),
-           horizontalAlignment = Alignment.CenterHorizontally) {
+           horizontalAlignment = Alignment.CenterHorizontally,
+           verticalArrangement = if (turn != 0f) Arrangement.Center else Arrangement.Top) {
         Text(o.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
              color = when { on && t.flat -> Color.White; on -> accent; else -> t.railText })
         Text(o.value, fontSize = 10.sp, color = if (on && t.flat) Color.White else t.railDim, maxLines = 1)
@@ -236,6 +242,33 @@ private fun SettingPanel(o: Option, part: Int, t: PadTheme, close: () -> Unit) {
             o.panel?.invoke()
         }
     }
+}
+
+/**
+ * Which way the phone is held, as the turn (degrees) that makes text upright on a screen that
+ * does not rotate: 0 upright, -90 turned clockwise onto its side, 90 the other way. A little
+ * hysteresis, so it does not flicker at 45 degrees.
+ */
+@Composable
+private fun rememberPhoneTurn(): Float {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var turn by remember { mutableStateOf(0f) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val l = object : android.view.OrientationEventListener(context) {
+            override fun onOrientationChanged(deg: Int) {
+                if (deg == ORIENTATION_UNKNOWN) return
+                turn = when {
+                    deg in 65..115 -> -90f
+                    deg in 245..295 -> 90f
+                    deg <= 25 || deg >= 335 || deg in 155..205 -> 0f
+                    else -> turn
+                }
+            }
+        }
+        if (l.canDetectOrientation()) l.enable()
+        onDispose { l.disable() }
+    }
+    return turn
 }
 
 /** A word or two for the rail: the effects that are on for this part. */
