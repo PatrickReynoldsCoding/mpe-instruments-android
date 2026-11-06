@@ -4,6 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.patrickreynolds.mpeinstruments.controllers.Controllers
+import com.patrickreynolds.mpeinstruments.controllers.ExternalMidi
+import com.patrickreynolds.mpeinstruments.controllers.TouchPad
 import java.io.File
 
 /**
@@ -11,6 +14,8 @@ import java.io.File
  *   adb shell am broadcast -n com.patrickreynolds.mpeinstruments/.DebugReceiver -a RECORD --ef seconds 5 --es name note
  *   ... -a STATS
  *   ... -a SET --es instrument strings/cello --ei watchdog 1500 --ei transpose 0 --ef volume 0.8 --ez eink false
+ *       --es controller midi|touchpad picks the controller; transpose and bend are External MIDI's;
+ *       --es pad '{"split":true,"arp0":{"arp":true,"rate":4}}' sets the touch pad's split and arps (as a preset).
  *   ... -a PANIC
  *   ... -a BLE_CONNECT --ef seconds 15     scan for a BLE MIDI device, connect to the first found
  *   ... -a PHONE --ei tilt 2 --ef amount 2 --ef angle 16 --ei breath 1 --ef level 0.5 --ef sensitivity 0.5
@@ -52,11 +57,14 @@ class DebugReceiver : BroadcastReceiver() {
                     else Log.w(TAG, "unknown instrument $id")
                 }
                 if (intent.hasExtra("watchdog")) Native.nativeSetWatchdogMs(intent.getIntExtra("watchdog", 0))
-                if (intent.hasExtra("transpose")) AppState.changeTranspose(intent.getIntExtra("transpose", 0))
+                intent.getStringExtra("controller")?.let { AppState.switchController(Controllers.byId(it)) }
+                if (intent.hasExtra("transpose")) ExternalMidi.update { it.copy(transpose = intent.getIntExtra("transpose", 0)) }
                 if (intent.hasExtra("volume")) AppState.changeVolume(intent.getFloatExtra("volume", 0.8f))
-                if (intent.hasExtra("bend")) AppState.changeBendRange(intent.getFloatExtra("bend", 48f))
+                if (intent.hasExtra("bend")) ExternalMidi.update { it.copy(bendRange = intent.getFloatExtra("bend", 48f)) }
+                intent.getStringExtra("pad")?.let { j ->
+                    TouchPad.loadPreset(org.json.JSONObject(j)); AppState.controllerChanged(TouchPad) }
                 if (intent.hasExtra("eink")) AppState.changeEink(intent.getBooleanExtra("eink", false))
-                // --es perf '<Perf json>' sets the whole performance (split, arp, effects); --es preset <name> loads one.
+                // --es perf '<Perf json>' sets the whole sound (parts, layer, effects); --es preset <name> loads one.
                 intent.getStringExtra("perf")?.let { j -> AppState.update { Perf.from(org.json.JSONObject(j)) } }
                 intent.getStringExtra("preset")?.let { n -> AppState.allPresets.firstOrNull { it.name == n }?.let { AppState.load(it) } }
                 Log.i(TAG, "SET done")

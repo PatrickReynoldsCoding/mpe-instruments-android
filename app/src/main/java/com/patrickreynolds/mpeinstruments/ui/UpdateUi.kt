@@ -33,7 +33,7 @@ import com.patrickreynolds.mpeinstruments.Updater.State
 import java.text.DateFormat
 import java.util.Date
 
-/** Setup tab: the version, a check for a newer one, and installing it. */
+/** Settings tab: the version, a check for a newer one, and installing it. */
 @Composable
 fun UpdatesCard() {
     val context = LocalContext.current
@@ -102,7 +102,7 @@ private fun ReleaseInfo(r: Updater.Release) {
          modifier = Modifier.padding(top = 4.dp))
 }
 
-/** Play tab: a newer version is out. Tapping goes to Setup, where it is installed. */
+/** Play tab: a newer version is out. Tapping goes to Settings, where it is installed. */
 @Composable
 fun UpdateBanner(openSetup: () -> Unit) {
     val r = (Updater.state as? State.Available)?.release ?: return
@@ -112,7 +112,7 @@ fun UpdateBanner(openSetup: () -> Unit) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Version ${r.version} is available", color = PartColors[1], fontWeight = FontWeight.SemiBold)
-                Text("Update from Setup → Updates", color = TextDim, fontSize = 13.sp)
+                Text("Update from Settings → Updates", color = TextDim, fontSize = 13.sp)
             }
             Text("Update", color = PartColors[1], fontWeight = FontWeight.SemiBold)
         }

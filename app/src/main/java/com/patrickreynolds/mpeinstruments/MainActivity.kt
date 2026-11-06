@@ -40,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -61,19 +62,23 @@ import com.patrickreynolds.mpeinstruments.ui.Line
 import com.patrickreynolds.mpeinstruments.ui.MpeIcons
 import com.patrickreynolds.mpeinstruments.ui.MpeTheme
 import com.patrickreynolds.mpeinstruments.ui.Panel
-import com.patrickreynolds.mpeinstruments.ui.PadScreen
+import com.patrickreynolds.mpeinstruments.ui.LibraryScreen
+import com.patrickreynolds.mpeinstruments.ui.LocalDevices
+import com.patrickreynolds.mpeinstruments.ui.PlayHost
 import com.patrickreynolds.mpeinstruments.ui.PartColors
-import com.patrickreynolds.mpeinstruments.ui.PerformScreen
 import com.patrickreynolds.mpeinstruments.ui.PlayScreen
 import com.patrickreynolds.mpeinstruments.ui.PresetSheet
 import com.patrickreynolds.mpeinstruments.ui.SetupActions
 import com.patrickreynolds.mpeinstruments.ui.SetupScreen
-import com.patrickreynolds.mpeinstruments.ui.SoundScreen
 import com.patrickreynolds.mpeinstruments.ui.TextDim
 import com.patrickreynolds.mpeinstruments.ui.Warn
 import kotlinx.coroutines.delay
 
-/** Four tabs: Play (the way into the fullscreen touch pad), Perform (split, arp, tempo, scale), Sound (effects), Setup. */
+/**
+ * Three tabs: Play (the controller in use and the way into it, full screen; what is loaded),
+ * Library (presets and sounds) and Settings (the app and the phone). Everything you play with is on
+ * the play screen's rail.
+ */
 class MainActivity : ComponentActivity() {
     private var ble: BleScanner? = null
     private val bleFound = mutableStateListOf<BluetoothDevice>()
@@ -120,12 +125,13 @@ class MainActivity : ComponentActivity() {
         scanning = true
     }
 
-    /** The touch pad takes the whole screen: landscape, no system bars, screen kept on. */
+    /** The play screen takes the whole screen: no system bars, screen kept on, and on its side for the touch pad. */
     private fun showPad(open: Boolean) {
         padOpen = open
         val bars = WindowCompat.getInsetsController(window, window.decorView)
         if (open) {
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            requestedOrientation = if (AppState.controller.landscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                   else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             bars.hide(WindowInsetsCompat.Type.systemBars())
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -148,27 +154,21 @@ class MainActivity : ComponentActivity() {
         var stats by remember { mutableStateOf<Stats?>(null) }
         var presets by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { while (true) { stats = Stats.from(Native.nativeStats()); delay(250) } }
-        // Split > Learn: the next note played sets the split point (the engine splits on the note as sent).
-        LaunchedEffect(AppState.learningSplit) {
-            val buf = FloatArray(16 * 5)
-            while (AppState.learningSplit) {
-                if (Native.nativeFingers(buf) > 0) {
-                    AppState.update { it.copy(splitNote = buf[1].toInt()) }
-                    AppState.learningSplit = false
-                }
-                delay(15)
-            }
-        }
+        val devices = SetupActions(bleFound, scanning, ::scanBle, ::stopApp)
         if (padOpen) {
             BackHandler { showPad(false) }
             // Gyro on: keep the pad the way up it is, or a firm turn would flip the screen mid-note.
             val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
                 android.content.res.Configuration.ORIENTATION_LANDSCAPE
-            LaunchedEffect(AppState.mods.gyroOn, landscape) {
-                requestedOrientation = if (AppState.mods.gyroOn && landscape) ActivityInfo.SCREEN_ORIENTATION_LOCKED
-                                       else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            val wantsSide = AppState.controller.landscape
+            LaunchedEffect(AppState.mods.gyroOn, landscape, wantsSide) {
+                requestedOrientation = when {
+                    AppState.mods.gyroOn && (landscape || !wantsSide) -> ActivityInfo.SCREEN_ORIENTATION_LOCKED
+                    wantsSide -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                }
             }
-            PadScreen { showPad(false) }
+            CompositionLocalProvider(LocalDevices provides devices) { PlayHost { showPad(false) } }
             return
         }
         val tick = midiTick
@@ -189,8 +189,7 @@ class MainActivity : ComponentActivity() {
             bottomBar = {
                 NavigationBar(containerColor = Panel, modifier = if (Eink) Modifier.border(BorderStroke(Edge, Line)) else Modifier) {
                     val items = listOf(
-                        "Play" to Icons.Filled.PlayArrow, "Perform" to MpeIcons.Arp,
-                        "Sound" to MpeIcons.Sliders, "Setup" to Icons.Filled.Settings)
+                        "Play" to Icons.Filled.PlayArrow, "Library" to MpeIcons.Sliders, "Settings" to Icons.Filled.Settings)
                     items.forEachIndexed { i, (label, icon) ->
                         NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(icon, label) }, label = { Text(label) },
                             colors = NavigationBarItemDefaults.colors(
@@ -201,11 +200,12 @@ class MainActivity : ComponentActivity() {
             },
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
-                when (tab) {
-                    0 -> PlayScreen(stats, openPad = { showPad(true) }, openSetup = { tab = 3 })
-                    1 -> PerformScreen()
-                    2 -> SoundScreen()
-                    else -> SetupScreen(stats, SetupActions(bleFound, scanning, ::scanBle, ::stopApp), tick)
+                CompositionLocalProvider(LocalDevices provides devices) {
+                    when (tab) {
+                        0 -> PlayScreen(stats, openPlay = { showPad(true) }, openSetup = { tab = 2 })
+                        1 -> LibraryScreen()
+                        else -> SetupScreen(stats, devices, tick)
+                    }
                 }
             }
         }
@@ -219,7 +219,7 @@ class MainActivity : ComponentActivity() {
         val (color, text) = when {
             name.isNotEmpty() -> PartColors[1] to name
             waiting.isNotEmpty() -> Warn to "Waiting for $waiting"
-            else -> TextDim to "No controller"
+            else -> TextDim to AppState.controller.name
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(color))

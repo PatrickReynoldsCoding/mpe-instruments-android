@@ -176,7 +176,8 @@ while time.time() < end:
     time.sleep(0.5)
 check("app starts and auto-connects to the (emulated) Seaboard", st.get("midiState") == "1",
       f'connected="{st.get("connected")}", path={st.get("path")}, burst={st.get("burst")}')
-app_cmd("SET", "--ei", "watchdog", "0", "--ei", "transpose", "0", "--ef", "volume", "0.8")
+# The fake Seaboard is External MIDI's: its transpose, bend range and pitch assist apply.
+app_cmd("SET", "--es", "controller", "midi", "--ei", "watchdog", "0", "--ei", "transpose", "0", "--ef", "volume", "0.8")
 
 # ---- 1. pitch through the whole chain, several instruments --------------------------------
 for inst, note in [("strings/cello", 50), ("strings/violin", 69), ("winds/flute", 79), ("synths/fm-keys", 60),
@@ -307,8 +308,11 @@ if want("switch"):
 # ---- 5b. split and arpeggiator through the real MIDI stack ---------------------------------
 if want("arp"):
     # Left of C4: an fm-keys arpeggio, 110 bpm sixteenths (7.33 steps/s). Right: a cello note.
-    app_cmd("SET", "--es", "perf", json.dumps({"layout": 1, "splitNote": 60, "bpm": 110,
-            "part0": {"instrument": "synths/fm-keys", "arp": True, "order": 0, "rate": 4, "reverb": 0},
+    # Split and arp are the touch pad's: with it in use, a MIDI note left of C4 goes to the left pad's part.
+    app_cmd("SET", "--es", "controller", "touchpad",
+            "--es", "pad", json.dumps({"split": True, "arp0": {"arp": True, "order": 0, "rate": 4}}),
+            "--es", "perf", json.dumps({"bpm": 110,
+            "part0": {"instrument": "synths/fm-keys", "reverb": 0},
             "part1": {"instrument": "strings/cello", "reverb": 0}}))
     time.sleep(1.0)
     s0 = int(stats().get("arpSteps", 0))
@@ -326,7 +330,7 @@ if want("arp"):
     st = stats()
     after = int(st.get("arpSteps", 0)) - s0 - steps
     check("arp: stops when the hand lifts (no latch)", after <= 1, f"{after} steps after release")
-    app_cmd("SET", "--es", "perf", DEFAULT_PERF)
+    app_cmd("SET", "--es", "pad", json.dumps({"split": False}), "--es", "controller", "midi", "--es", "perf", DEFAULT_PERF)
     time.sleep(0.5)
 
 # ---- 5c. the phone as a controller: tilt and breath ----------------------------------------------

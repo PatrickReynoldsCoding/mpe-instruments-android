@@ -248,13 +248,11 @@ fun LoopControls(accent: Color) {
     Text("Up to four loops, each its own length: a short drum loop and a long chord loop, say. On a loop, the first " +
          "press records it, from your first note; each press after that records one time round over it, as a new layer. " +
          "Switch presets between layers to build it up from different sounds.", color = TextDim, fontSize = 12.sp)
-    SwitchRow("Loop buttons on the pad", AppState.loopDock, "Loops, undo, pause and your presets, at the top right", accent = accent) {
+    SwitchRow("Loop buttons on the play screen", AppState.loopDock, "Loops, undo, pause and your presets, at the top right", accent = accent) {
         AppState.changeLoopDock(it) }
     SwitchRow("Snap lengths to beats", AppState.loopSnap, "Every loop is a whole number of beats at the tempo, so loops of " +
               "different lengths, the arpeggiator and the delay stay in time", accent = accent) { AppState.changeLoopSnap(it) }
-    val bpm = AppState.perf.bpm
-    LabeledSlider("Tempo", bpm, 40f..220f, "${bpm.roundToInt()} bpm", accent = accent) { x ->
-        AppState.update { it.copy(bpm = x.roundToInt().toFloat()) } }
+    TempoControls(accent)
     val shown = (vs.indexOfLast { it.used } + 2).coerceIn(1, Looper.LOOPS)
     for (k in 0 until shown) {
         val v = vs[k]

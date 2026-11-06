@@ -3,15 +3,31 @@ package com.patrickreynolds.mpeinstruments
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/** One part (left or right of a split, or a layer): mirrors mpe::PartConfig. */
-data class Part(
-    val instrument: String = "strings/cello",
-    val arp: Boolean = false,
+/** The arpeggiator of one part: a touch pad setting (the pad sends it to the engine). Mirrors mpe::ArpConfig. */
+data class Arp(
+    val on: Boolean = false,
     val order: Int = 0,            // ArpOrder: 0 up, 1 down, 2 up-down, 3 as played, 4 random, 5 chord
     val rate: Float = 4f,          // steps per beat
     val gate: Float = 0.6f,
     val octaves: Int = 1,
     val latch: Boolean = false,
+) {
+    fun json() = JSONObject().apply {
+        put("arp", on); put("order", order); put("rate", rate.toDouble()); put("gate", gate.toDouble())
+        put("octaves", octaves); put("latch", latch)
+    }
+    companion object {
+        /** Also reads a part of before 0.16, which kept its arp in it. */
+        fun from(o: JSONObject?, d: Arp = Arp()) = if (o == null) d else Arp(
+            o.optBoolean("arp", d.on), o.optInt("order", d.order).coerceIn(ARP_ORDERS.indices),
+            o.optDouble("rate", d.rate.toDouble()).toFloat(), o.optDouble("gate", d.gate.toDouble()).toFloat(),
+            o.optInt("octaves", d.octaves).coerceIn(1, 4), o.optBoolean("latch", d.latch))
+    }
+}
+
+/** One part, a sound: mirrors mpe::PartConfig, but for the arp, which the controller brings. */
+data class Part(
+    val instrument: String = "strings/cello",
     val transpose: Int = 0,
     val volume: Float = 1f,
     val brightness: Float = 1f,
@@ -22,8 +38,7 @@ data class Part(
     val release: Float = 0f,       // s the note plays on and fades after the finger lifts; 0 = the instrument's own
 ) {
     fun json() = JSONObject().apply {
-        put("instrument", instrument); put("arp", arp); put("order", order); put("rate", rate.toDouble())
-        put("gate", gate.toDouble()); put("octaves", octaves); put("latch", latch); put("transpose", transpose)
+        put("instrument", instrument); put("transpose", transpose)
         put("volume", volume.toDouble()); put("brightness", brightness.toDouble()); put("drive", drive.toDouble())
         put("pressureCurve", pressureCurve.toDouble()); put("reverb", reverb.toDouble()); put("delay", delay.toDouble())
         put("release", release.toDouble())
@@ -31,9 +46,7 @@ data class Part(
 
     companion object {
         fun from(o: JSONObject?, d: Part = Part()): Part = if (o == null) d else Part(
-            o.optString("instrument", d.instrument), o.optBoolean("arp", d.arp), o.optInt("order", d.order),
-            o.optDouble("rate", d.rate.toDouble()).toFloat(), o.optDouble("gate", d.gate.toDouble()).toFloat(),
-            o.optInt("octaves", d.octaves), o.optBoolean("latch", d.latch), o.optInt("transpose", d.transpose),
+            o.optString("instrument", d.instrument), o.optInt("transpose", d.transpose),
             o.optDouble("volume", d.volume.toDouble()).toFloat(), o.optDouble("brightness", d.brightness.toDouble()).toFloat(),
             o.optDouble("drive", d.drive.toDouble()).toFloat(), o.optDouble("pressureCurve", d.pressureCurve.toDouble()).toFloat(),
             o.optDouble("reverb", d.reverb.toDouble()).toFloat(), o.optDouble("delay", d.delay.toDouble()).toFloat(),
@@ -41,14 +54,26 @@ data class Part(
     }
 }
 
-/** Everything a preset holds: mirrors mpe::Performance, plus each part's instrument. */
-data class Perf(
-    val layout: Int = 0,           // 0 single, 1 split, 2 layer
-    val splitNote: Int = 60,
-    val bpm: Float = 110f,
-    val scale: Int = 0,            // index into SCALES; 0 = off
+/**
+ * What the controller in use sets in the engine, beside the sound: a split (two parts, each
+ * finger told its part), each part's arp, pitch assist, transpose and the pitch bend range of
+ * the notes it sends.
+ */
+data class EngineShape(
+    val split: Boolean = false,
+    val arps: List<Arp> = listOf(Arp(), Arp()),
+    val scale: Int = 0,            // pitch assist: index into SCALES; 0 = off
     val scaleRoot: Int = 0,
     val assist: Float = 0.6f,
+    val transpose: Int = 0,
+    val bendRange: Float = 48f,
+    val splitNote: Int = 60,       // a split's divide for notes that do not say their part
+)
+
+/** The sound, which every controller plays: the parts, a second one layered or not, tempo and effects. */
+data class Perf(
+    val layered: Boolean = false,  // every note plays both parts (unless the controller splits them)
+    val bpm: Float = 110f,
     val reverbSize: Float = 0.5f,
     val reverbDamp: Float = 0.4f,
     val delayBeats: Float = 0.75f,
@@ -59,18 +84,24 @@ data class Perf(
     fun part(i: Int) = parts[i]
     fun withPart(i: Int, f: (Part) -> Part) = copy(parts = parts.mapIndexed { k, p -> if (k == i) f(p) else p })
 
+    /** The engine's layout: 0 one part, 1 split, 2 layered. */
+    fun layout(shape: EngineShape) = if (shape.split) 1 else if (layered) 2 else 0
+
     /** The layout nativeSetPerformance (jni.cpp) reads. Keep the two in step. */
-    fun toArray(): FloatArray {
+    fun toArray(shape: EngineShape): FloatArray {
         val a = FloatArray(11 + 2 * 14)
-        a[0] = layout.toFloat(); a[1] = splitNote.toFloat(); a[2] = bpm
-        a[3] = SCALES[scale.coerceIn(SCALES.indices)].mask.toFloat(); a[4] = scaleRoot.toFloat()
-        a[5] = if (scale == 0) 0f else assist
+        val layout = layout(shape)
+        a[0] = layout.toFloat(); a[1] = shape.splitNote.toFloat(); a[2] = bpm
+        a[3] = SCALES[shape.scale.coerceIn(SCALES.indices)].mask.toFloat(); a[4] = shape.scaleRoot.toFloat()
+        a[5] = if (shape.scale == 0) 0f else shape.assist
         a[6] = reverbSize; a[7] = reverbDamp; a[8] = delayBeats; a[9] = delayFeedback; a[10] = if (delayPingPong) 1f else 0f
         for (k in 0..1) {
             val p = parts[k]
+            // Layered on one pad: both parts arpeggiate as the pad does.
+            val r = if (layout == 2) shape.arps[0] else shape.arps[k]
             val b = 11 + 14 * k
-            a[b] = if (p.arp) 1f else 0f; a[b + 1] = p.order.toFloat(); a[b + 2] = p.rate; a[b + 3] = p.gate
-            a[b + 4] = p.octaves.toFloat(); a[b + 5] = if (p.latch) 1f else 0f; a[b + 6] = p.transpose.toFloat()
+            a[b] = if (r.on) 1f else 0f; a[b + 1] = r.order.toFloat(); a[b + 2] = r.rate; a[b + 3] = r.gate
+            a[b + 4] = r.octaves.toFloat(); a[b + 5] = if (r.latch) 1f else 0f; a[b + 6] = p.transpose.toFloat()
             a[b + 7] = p.volume; a[b + 8] = p.brightness; a[b + 9] = p.drive; a[b + 10] = p.pressureCurve
             a[b + 11] = p.reverb; a[b + 12] = p.delay; a[b + 13] = p.release
         }
@@ -78,8 +109,7 @@ data class Perf(
     }
 
     fun json(): JSONObject = JSONObject().apply {
-        put("layout", layout); put("splitNote", splitNote); put("bpm", bpm.toDouble()); put("scale", scale)
-        put("scaleRoot", scaleRoot); put("assist", assist.toDouble()); put("reverbSize", reverbSize.toDouble())
+        put("layered", layered); put("bpm", bpm.toDouble()); put("reverbSize", reverbSize.toDouble())
         put("reverbDamp", reverbDamp.toDouble()); put("delayBeats", delayBeats.toDouble())
         put("delayFeedback", delayFeedback.toDouble()); put("delayPingPong", delayPingPong)
         put("part0", parts[0].json()); put("part1", parts[1].json())
@@ -90,8 +120,9 @@ data class Perf(
             val d = Perf()
             if (o == null) return d
             return Perf(
-                o.optInt("layout", d.layout), o.optInt("splitNote", d.splitNote), o.optDouble("bpm", d.bpm.toDouble()).toFloat(),
-                o.optInt("scale", d.scale), o.optInt("scaleRoot", d.scaleRoot), o.optDouble("assist", d.assist.toDouble()).toFloat(),
+                // Before 0.16 the layout was 0 single, 1 split (now the touch pad's), 2 layered.
+                if (o.has("layered")) o.optBoolean("layered") else o.optInt("layout", 0) == 2,
+                o.optDouble("bpm", d.bpm.toDouble()).toFloat(),
                 o.optDouble("reverbSize", d.reverbSize.toDouble()).toFloat(), o.optDouble("reverbDamp", d.reverbDamp.toDouble()).toFloat(),
                 o.optDouble("delayBeats", d.delayBeats.toDouble()).toFloat(), o.optDouble("delayFeedback", d.delayFeedback.toDouble()).toFloat(),
                 o.optBoolean("delayPingPong", d.delayPingPong),
@@ -120,7 +151,6 @@ data class PadSettings(
     val vibrato: Int = 2,          // a small wiggle of the finger made bigger: index into VIBRATO
     val vibSense: Int = 1,         // how small a wiggle makes the full vibrato: index into VIB_SENSE
     val fade: Int = 2,             // how much of the bottom of the pad fades to silence: index into FADE
-    val hideRail: Boolean = false, // the settings rail is tucked away (the screen as a whole: left pad only)
     // Chord modes: instead of a scale, the pad holds only the notes of one chord, picked on a chord
     // wheel (circle of fifths) or a chord grid that takes the left part of the pad.
     val chordMode: Int = 0,        // 0 a scale, 1 the chord wheel, 2 the chord grid
@@ -137,7 +167,7 @@ data class PadSettings(
         put("size", size); put("octave", octave); put("key", key); put("scale", scale)
         put("vertical", vertical); put("glide", glide.toDouble()); put("shift", shift); put("locked", locked)
         put("theme", theme); put("lines", lines); put("vibrato", vibrato)
-        put("vibSense", vibSense); put("fade", fade); put("hideRail", hideRail)
+        put("vibSense", vibSense); put("fade", fade)
         put("chordMode", chordMode); put("chordRoot", chordRoot); put("chordType", chordType); put("chordMod", chordMod)
         put("wheelRings", org.json.JSONArray(wheelRings)); put("wheelAlign", org.json.JSONArray(wheelAlign))
         put("gridRows", org.json.JSONArray(gridRows))
@@ -166,7 +196,6 @@ data class PadSettings(
             o.optInt("theme", d.theme).coerceIn(0, 9), o.optInt("lines", d.lines).coerceIn(0, 2),
             o.optInt("vibrato", d.vibrato).coerceIn(VIBRATO.indices),
             o.optInt("vibSense", d.vibSense).coerceIn(VIB_SENSE.indices), o.optInt("fade", d.fade).coerceIn(FADE.indices),
-            o.optBoolean("hideRail", d.hideRail),
             o.optInt("chordMode", d.chordMode).coerceIn(0, 2), o.optInt("chordRoot", d.chordRoot).coerceIn(0, 11),
             o.optString("chordType", d.chordType).takeIf { it in Chords.TYPES } ?: d.chordType,
             o.optString("chordMod", d.chordMod).takeIf { it in Chords.MODS } ?: "",

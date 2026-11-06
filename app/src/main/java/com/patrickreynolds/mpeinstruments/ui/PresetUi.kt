@@ -104,7 +104,7 @@ private fun PresetRow(p: Preset, on: Boolean, accent: Color, onLoaded: () -> Uni
         Column(Modifier.weight(1f)) {
             Text(p.name, fontSize = 16.sp, color = if (on) accent else Color.Unspecified,
                  fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal)
-            Text(presetSummary(p.perf), color = TextDim, fontSize = 12.sp, maxLines = 1)
+            Text(presetSummary(p), color = TextDim, fontSize = 12.sp, maxLines = 1)
         }
         Box {
             TextButton(onClick = { menu = true }) { Text("⋮", fontSize = 18.sp, color = TextDim) }

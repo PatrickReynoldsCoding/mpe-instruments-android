@@ -57,6 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.AppState
+import com.patrickreynolds.mpeinstruments.controllers.Option
+import com.patrickreynolds.mpeinstruments.controllers.TouchPad
 import com.patrickreynolds.mpeinstruments.NOTE_NAMES
 import com.patrickreynolds.mpeinstruments.Native
 import com.patrickreynolds.mpeinstruments.ModReading
@@ -76,23 +78,20 @@ import kotlin.math.sign
 import kotlin.math.tanh
 
 /**
- * The screen as an instrument: columns of notes left to right, each finger its own MPE voice.
+ * The touch pad's play surface: columns of notes left to right, each finger its own MPE voice.
  * Slide sideways to glide, up for louder and brighter (the bottom edge is silent), rock a finger
- * for vibrato. The notes go into the engine through
- * the same parser as the Seaboard's (Native.nativeTouch), so the arp, split and effects all
- * apply. A Seaboard played at the same time shows here too.
+ * for vibrato. The notes go into the engine through the same parser as the Seaboard's
+ * (Native.nativeTouch), so the arp, split and effects all apply. A Seaboard played at the same
+ * time shows here too. The rail and the loop buttons around it are the app's (PlayHost).
  */
 @Composable
-fun PadScreen(onClose: () -> Unit) {
+fun TouchPadSurface(@Suppress("UNUSED_PARAMETER") part: Int) {
     val pad = remember { Pad() }
     var frame by remember { mutableIntStateOf(0) }
-    var panel by remember { mutableStateOf<String?>(null) }
-    val split = AppState.perf.layout == 1
-    val side = if (split) AppState.padSide.coerceIn(0, 1) else 0
-    val theme = padTheme(AppState.pad)
+    val split = TouchPad.split
+    val theme = padTheme(TouchPad.pad)
     pad.hudStack = AppState.loopDock
     DisposableEffect(Unit) { onDispose { pad.releaseAll() } }
-    LoopTicker()
     LaunchedEffect(Unit) {
         var last = 0L
         while (true) {
@@ -103,13 +102,9 @@ fun PadScreen(onClose: () -> Unit) {
             if (!pad.theme.flat || pad.takeDirty()) frame++
         }
     }
-    val railShown = !AppState.pad.hideRail
-    Box(Modifier.fillMaxSize().background(theme.bottom)) {
-      Row(Modifier.fillMaxSize()) {
-        if (railShown) Rail(side, split, theme, panel, { panel = if (panel == it) null else it }, onClose)
-        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(theme.bottom)) {
         pad.widthDp = maxWidth.value
-        pad.layout(AppState.pads, split, AppState.padSplitAt, FloatArray(2) { AppState.instrument(it)?.centerNote ?: 60f },
+        pad.layout(TouchPad.pads, split, TouchPad.splitAt, FloatArray(2) { AppState.instrument(it)?.centerNote ?: 60f },
                    BooleanArray(2) { AppState.instrument(it)?.group == "drums" }, theme)
         Canvas(Modifier.fillMaxSize().systemGestureExclusion()
             .pointerInput(Unit) {
@@ -139,24 +134,12 @@ fun PadScreen(onClose: () -> Unit) {
         }
         // The chord pickers, over the left part of each pad in a chord mode.
         for (k in 0 until (if (split) 2 else 1)) {
-            val ps = AppState.pads[k]
+            val ps = TouchPad.pads[k]
             val drums = AppState.instrument(k)?.group == "drums"
-            val (a, b) = if (!split) 0f to 1f else if (k == 0) 0f to AppState.padSplitAt else AppState.padSplitAt to 1f
+            val (a, b) = if (!split) 0f to 1f else if (k == 0) 0f to TouchPad.splitAt else TouchPad.splitAt to 1f
             val f = pickerFrac(ps, drums, (b - a) * maxWidth.value)
             if (f > 0f) ChordPicker(k, ps, theme, Modifier.offset(x = maxWidth * a).width(maxWidth * (b - a) * f)
                                                         .height(maxHeight - STRIP))
-        }
-        if (AppState.loopDock) LoopDock(theme, Modifier.align(Alignment.TopEnd).padding(6.dp))
-        }
-      }
-        if (railShown) panel?.let { SettingPanel(it, side, split, theme) { panel = null } }
-        // The rail tucked away: one small button in the corner brings it back.
-        else Box(Modifier.padding(6.dp).size(44.dp)
-                     .background(if (theme.flat) Color.White else theme.rail, RoundedCornerShape(12.dp))
-                     .border(BorderStroke(if (theme.flat) 2.dp else 1.dp, if (theme.flat) Color.Black else theme.railDim), RoundedCornerShape(12.dp))
-                     .clickable { AppState.updatePad(0) { it.copy(hideRail = false) } },
-                 contentAlignment = Alignment.Center) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Show the settings", tint = theme.railText)
         }
     }
 }
@@ -193,241 +176,113 @@ private const val VIB_SLIDE_DPS = 40f
 private const val SNAP_HOLD = 0.08f
 
 /**
- * The settings rail at the left edge, Etherpad style: tap a setting to change it. With the pad
- * split, the toggle at the top picks the pad (left or right) the settings below it change.
+ * The touch pad's options on the rail, for one pad (the left or right of a split): its notes,
+ * up/down, glide, vibrato and arp; then, for the screen as a whole, the look, split and lock.
  */
 @Composable
-private fun Rail(side: Int, split: Boolean, t: PadTheme, open: String?, pick: (String) -> Unit, onClose: () -> Unit) {
-    val s = AppState.pads[side]
-    val part = AppState.perf.part(side)
-    val accent = t.parts[side]
-    Column(Modifier.fillMaxHeight().width(92.dp).background(t.rail)
-               .then(if (t.flat) Modifier.border(BorderStroke(2.dp, Color.Black)) else Modifier)
-               .verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
-           horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row {
-            IconButton(onClick = onClose, Modifier.size(44.dp)) { Icon(Icons.Filled.Close, "Close", tint = t.railDim) }
-            // Tuck the rail away for the whole width to play on; the corner button brings it back.
-            IconButton(onClick = { AppState.updatePad(0) { it.copy(hideRail = true) } }, Modifier.size(44.dp)) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Hide the settings", tint = t.railDim) }
-        }
-        if (split) SideToggle(side, t)
-        val items = listOf(
-            "Presets" to AppState.presetName.ifEmpty { "None" },
-            "Sound" to (AppState.instrument(side)?.name ?: ""),
-            "Arp" to (if (part.arp) ARP_ORDERS[part.order.coerceIn(ARP_ORDERS.indices)] else "Off"),
-            "Effects" to effectsSummary(part),
-            "Loop" to loopSummary(),
-            "Release" to releaseName(part.release),
-            "Size" to "${s.size}",
-            "Octave" to (if (s.octave == 0) "0" else "%+d".format(s.octave)),
-            "Key" to NOTE_NAMES[s.key],
-            "Scale" to when (s.chordMode) { 1 -> "Wheel"; 2 -> "Grid"; else -> if (s.scale == 0) "All notes" else SCALES[s.scale].name },
-            "Up/down" to PadSettings.VERTICAL[s.vertical],
-            "Glide" to PadSettings.glideName(s.glide),
-            "Vibrato" to PadSettings.VIBRATO[s.vibrato],
-            // Experimental: on the rail once turned on in Setup (or while its panel is open here).
-            "Gyro" to gyroSummary(AppState.mods),
-            "Breath" to PhoneMods.BREATH[AppState.mods.breath],
-            "Look" to if (Eink) "E-ink" else PAD_THEMES[AppState.pad.theme].name,
-        ).filter { (label, _) -> when (label) {
-            "Gyro" -> AppState.mods.gyroOn || open == "Gyro"
-            "Breath" -> AppState.mods.breath != 0 || open == "Breath"
-            else -> true
-        } }
-        for ((label, value) in items) RailItem(label, value, open == label, t, accent) { pick(label) }
-        // Not panels: one tap each. Split makes two pads, each with its own sound and settings.
-        val layout = AppState.perf.layout
-        RailItem("Split", when (layout) { 1 -> "Two pads"; 2 -> "Layered"; else -> "One pad" }, split, t, accent) {
-            AppState.update { it.copy(layout = if (it.layout == 1) 0 else 1) }
-        }
-        // Lock: the note strip plays instead of moving the notes, so a stray touch cannot move them.
-        val locked = AppState.pad.locked
-        RailItem(if (locked) "Locked" else "Lock", if (locked) "Strip plays" else "Strip moves", locked, t, accent) {
-            AppState.updatePad(0) { it.copy(locked = !it.locked) }
-        }
-    }
-}
-
-/** A word or two for the rail: what the gyro's sources do ("Off", "Twist: Bend", "2 on"). */
-private fun gyroSummary(m: PhoneMods): String {
-    val on = m.gyro.withIndex().filter { it.value.target != 0 }
-    return when (on.size) {
-        0 -> "Off"
-        1 -> "${PhoneMods.SOURCES[on[0].index]}: ${com.patrickreynolds.mpeinstruments.GyroSettings.TARGETS[on[0].value.target]}"
-        else -> "${on.size} on"
-    }
-}
-
-/** A word or two for the rail: the effects that are on for this part. */
-private fun effectsSummary(p: com.patrickreynolds.mpeinstruments.Part): String {
-    val on = listOfNotNull("Verb".takeIf { p.reverb > 0.01f }, "Delay".takeIf { p.delay > 0.01f },
-                           "Drive".takeIf { p.drive > 0.01f }, "Tone".takeIf { p.brightness < 0.999f })
-    return when { on.isEmpty() -> "Dry"; on.size <= 2 -> on.joinToString(" + "); else -> "${on.size} on" }
-}
-
-/** Left or right: which pad of a split the rail changes. */
-@Composable
-private fun SideToggle(side: Int, t: PadTheme) {
-    Row(Modifier.padding(horizontal = 6.dp).fillMaxWidth().height(34.dp)
-            .border(BorderStroke(if (t.flat) 2.dp else 1.dp, if (t.flat) Color.Black else t.railDim), RoundedCornerShape(8.dp))) {
-        for (k in 0..1) {
-            val on = k == side
-            Box(Modifier.weight(1f).fillMaxHeight()
-                    .background(when { !on -> Color.Transparent; t.flat -> Color.Black; else -> t.parts[k].copy(alpha = 0.3f) },
-                                RoundedCornerShape(8.dp))
-                    .clickable { AppState.padSide = k },
-                contentAlignment = Alignment.Center) {
-                Text(if (k == 0) "Left" else "Right", fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
-                     color = when { on && t.flat -> Color.White; on -> t.parts[k]; else -> t.railText })
-            }
-        }
-    }
-}
-
-@Composable
-private fun RailItem(label: String, value: String, on: Boolean, t: PadTheme, accent: Color, click: () -> Unit) {
-    Column(Modifier.clickable(onClick = click)
-               .then(if (on && t.flat) Modifier.background(Color.Black) else Modifier)
-               .padding(horizontal = 4.dp, vertical = 2.dp),
-           horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-             color = when { on && t.flat -> Color.White; on -> accent; else -> t.railText })
-        Text(value, fontSize = 10.sp, color = if (on && t.flat) Color.White else t.railDim, maxLines = 1)
-    }
-}
-
-@Composable
-private fun SettingPanel(which: String, side: Int, split: Boolean, t: PadTheme, close: () -> Unit) {
-    val s = AppState.pads[side]
+fun touchPadOptions(part: Int): List<Option> {
+    // Each pad of a split plays its own part; one pad (layered or not) has only the left pad's settings.
+    val split = TouchPad.split
+    val side = if (split) part.coerceIn(0, 1) else 0
+    val s = TouchPad.pads[side]
+    val arp = TouchPad.arps[side]
     val accent = if (Eink) Color.Black else PartColors[side]
-    fun set(change: (PadSettings) -> PadSettings) = AppState.updatePad(side, change)
-    Surface(Modifier.padding(start = 100.dp, top = 12.dp, bottom = 12.dp).widthIn(max = 380.dp),
-            shape = RoundedCornerShape(18.dp), color = if (t.flat) Color.White else Panel.copy(alpha = 0.96f), contentColor = Fg,
-            border = if (t.flat) BorderStroke(Edge, Color.Black) else null) {
-        Column(Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val shared = which in listOf("Look", "Gyro", "Breath", "Loop", "Presets")
-                Text(if (split && !shared) "$which · ${if (side == 0) "left" else "right"}" else which,
-                     fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                TextButton(onClick = close) { Text("Done") }
-            }
-            when (which) {
-                "Sound" -> LazyColumn {
-                    for ((group, list) in AppState.instruments.groupBy { it.group }) {
-                        item { Text(group.uppercase(), color = TextDim, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp)) }
-                        for (i in list) item {
-                            val chosen = i.id == AppState.perf.part(side).instrument
-                            Text(i.name, fontSize = 16.sp, color = if (chosen) PartColors[side] else Color.Unspecified,
-                                 modifier = Modifier.clickable { AppState.updatePart(side) { it.copy(instrument = i.id) } }
-                                     .fillMaxWidth().padding(vertical = 7.dp))
-                        }
-                    }
-                }
-                "Arp" -> Column(Modifier.verticalScroll(rememberScrollState())) {
-                    ArpControls(side, accent)
-                    val bpm = AppState.perf.bpm
-                    LabeledSlider("Tempo", bpm, 40f..220f, "${bpm.roundToInt()} bpm", accent = accent) { v ->
-                        AppState.update { it.copy(bpm = v.roundToInt().toFloat()) } }
-                }
-                "Effects" -> Column(Modifier.verticalScroll(rememberScrollState())) {
-                    PartEffects(side, accent)
-                    val level = AppState.perf.part(side).volume
-                    LabeledSlider("Level", level, 0f..1.5f, pct(level), accent = accent) { v -> AppState.updatePart(side) { it.copy(volume = v) } }
-                    Text(if (split) "Reverb (both pads)" else "Reverb", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                         modifier = Modifier.padding(top = 12.dp))
-                    ReverbControls()
-                    Text(if (split) "Delay (both pads)" else "Delay", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                         modifier = Modifier.padding(top = 12.dp))
-                    DelayControls()
-                }
-                "Loop" -> Column(Modifier.verticalScroll(rememberScrollState())) { LoopControls(accent) }
-                "Presets" -> Column(Modifier.verticalScroll(rememberScrollState())) { PresetLibrary(accent) }
-                "Release" -> {
-                    ReleaseSlider(side, accent)
-                    Text(if (AppState.perf.part(side).release < 0.01f) "A note ends the instrument's own way when you lift your finger."
-                         else "When you lift your finger the note plays on as it was and fades out over this time, " +
-                              "like holding a piano's sustain pedal. A new note on the same finger cuts it off.",
-                         color = TextDim, fontSize = 12.sp)
-                }
-                "Size" -> if (AppState.instrument(side)?.group == "drums")
-                    Stepper("${s.size.coerceIn(4, 12)} drums across") { d -> set { it.copy(size = (it.size.coerceIn(4, 12) + d).coerceIn(4, 12)) } }
-                else Stepper("${s.size} notes across") { d -> set { it.copy(size = (it.size + d).coerceIn(3, 24)) } }
-                "Octave" -> {
-                    Stepper(if (s.octave == 0) "Middle of the instrument" else "%+d octaves".format(s.octave)) { d ->
-                        set { it.copy(octave = (it.octave + d).coerceIn(-4, 4)) } }
-                    Text(if (AppState.pad.locked) "The note strip is locked (Lock on the rail)."
-                         else "Or drag the note strip along the bottom sideways.", color = TextDim, fontSize = 12.sp)
-                    if (s.shift != 0) TextButton(onClick = { set { it.copy(shift = 0) } }) {
-                        Text("Move the notes back (%+d)".format(s.shift)) }
-                }
-                "Key" -> Chips(NOTE_NAMES, s.key, accent) { k -> set { it.copy(key = k) } }
-                "Scale" -> Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("The pad's notes", color = TextDim, fontSize = 13.sp)
-                    Chips(listOf("A scale", "Chord wheel", "Chord grid"), s.chordMode, accent) { k -> set { it.copy(chordMode = k, shift = 0) } }
-                    if (s.chordMode == 0) {
-                        Text("Scale", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                        Chips(SCALES.map { if (it.mask == 0) "All notes" else it.name }, s.scale, accent) { k -> set { it.copy(scale = k) } }
-                    } else {
-                        Text(if (s.chordMode == 1)
-                            "The left of the pad is a circle of fifths: touch a chord and the pad holds only its notes; slide to " +
-                            "the next without lifting. The outer ring is major chords, the middle their relative minors, the inner " +
-                            "diminished: change them below. The buttons under the wheel add a 7th, 9th, 6th..."
-                            else "The left of the pad is a grid of chords: the roots across, a chord type in each row. Touch one and " +
-                            "the pad holds only its notes; slide to the next without lifting. Change the rows below.",
-                            color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-                        ChordLayoutEditor(side, s, accent)
-                    }
-                }
-                "Up/down" -> {
-                    Chips(PadSettings.VERTICAL, s.vertical, accent) { k -> set { it.copy(vertical = k) } }
-                    Text(when (s.vertical) {
-                        1 -> "Higher up the screen is brighter. Loudness stays the same."
-                        else -> "The height of a finger sets its loudness: the same height is always the same loudness."
-                    }, color = TextDim, fontSize = 12.sp)
-                    if (s.vertical != 1) {
-                        Text("Fade to silence", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                        Chips(PadSettings.FADE, s.fade, accent) { k -> set { it.copy(fade = k) } }
-                        Text(if (s.fade == 0) "The bottom edge is quiet but not silent."
-                             else "The bottom edge is silent, so sliding down fades a note out. A longer fade spreads " +
-                                  "it over more of the pad.", color = TextDim, fontSize = 12.sp)
-                    }
-                }
-                "Look" -> {
-                    val p0 = AppState.pad
-                    if (Eink) Text("E-ink is on (Setup tab), so the pad is black on white with no motion.",
-                                   color = TextDim, fontSize = 12.sp)
-                    else Chips(PAD_THEMES.map { it.name }, p0.theme) { k -> AppState.updatePad(0) { it.copy(theme = k) } }
-                    Text("Lines", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                    Chips(PadSettings.LINES, p0.lines) { k -> AppState.updatePad(0) { it.copy(lines = k) } }
-                }
-                // The gyro's tabs and meter stay at the top; the rest scrolls under them.
-                "Gyro" -> Column { GyroPanel(liveModReading(), scroll = true) }
-                "Breath" -> Column(Modifier.verticalScroll(rememberScrollState())) { BreathControls(liveModReading()) }
-                "Glide" -> {
-                    LabeledSlider("Glide", s.glide, 0f..1f, PadSettings.glideName(s.glide), accent = accent, steps = 19) { v ->
-                        set { it.copy(glide = v) } }
-                    Text(when {
-                        s.glide <= 0.005f -> "Snap: each column plays its note, and a finger moving across goes straight " +
-                                             "from one note to the next, with no bend in between."
-                        s.glide >= 0.995f -> "Free: pitch follows the finger exactly, like a fretless string."
-                        else -> "The middle of each column plays its note; nearer the edges the pitch glides to the next. " +
-                                "Higher glides over more of the column."
-                    }, color = TextDim, fontSize = 12.sp)
-                }
-                "Vibrato" -> {
-                    Chips(PadSettings.VIBRATO, s.vibrato, accent) { k -> set { it.copy(vibrato = k) } }
-                    if (s.vibrato != 0) {
-                        Text("Sensitivity", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                        Chips(PadSettings.VIB_SENSE, s.vibSense, accent) { k -> set { it.copy(vibSense = k) } }
-                    }
-                    Text(if (s.vibrato == 0) "The pitch moves only as far as the finger does."
-                         else "Rock a held finger from side to side: the small wobble is made bigger, so a vibrato " +
-                              "needs only a roll of the fingertip. Higher sensitivity needs a smaller roll. Slides are left alone.", color = TextDim, fontSize = 12.sp)
+    fun set(change: (PadSettings) -> PadSettings) = TouchPad.update(side, change)
+    val locked = TouchPad.pad.locked
+    // "Size · left": only a split's pads are told apart (a layer's sound is not a pad of its own).
+    return listOf<Option>(
+        Option("Size", "${s.size}") {
+            if (AppState.instrument(side)?.group == "drums")
+                Stepper("${s.size.coerceIn(4, 12)} drums across") { d -> set { it.copy(size = (it.size.coerceIn(4, 12) + d).coerceIn(4, 12)) } }
+            else Stepper("${s.size} notes across") { d -> set { it.copy(size = (it.size + d).coerceIn(3, 24)) } }
+        },
+        Option("Octave", if (s.octave == 0) "0" else "%+d".format(s.octave)) {
+            Stepper(if (s.octave == 0) "Middle of the instrument" else "%+d octaves".format(s.octave)) { d ->
+                set { it.copy(octave = (it.octave + d).coerceIn(-4, 4)) } }
+            Text(if (locked) "The note strip is locked (Lock on the rail)."
+                 else "Or drag the note strip along the bottom sideways.", color = TextDim, fontSize = 12.sp)
+            if (s.shift != 0) TextButton(onClick = { set { it.copy(shift = 0) } }) {
+                Text("Move the notes back (%+d)".format(s.shift)) }
+        },
+        Option("Key", NOTE_NAMES[s.key]) { Chips(NOTE_NAMES, s.key, accent) { k -> set { it.copy(key = k) } } },
+        Option("Scale", when (s.chordMode) { 1 -> "Wheel"; 2 -> "Grid"; else -> if (s.scale == 0) "All notes" else SCALES[s.scale].name }) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("The pad's notes", color = TextDim, fontSize = 13.sp)
+                Chips(listOf("A scale", "Chord wheel", "Chord grid"), s.chordMode, accent) { k -> set { it.copy(chordMode = k, shift = 0) } }
+                if (s.chordMode == 0) {
+                    Text("Scale", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                    Chips(SCALES.map { if (it.mask == 0) "All notes" else it.name }, s.scale, accent) { k -> set { it.copy(scale = k) } }
+                } else {
+                    Text(if (s.chordMode == 1)
+                        "The left of the pad is a circle of fifths: touch a chord and the pad holds only its notes; slide to " +
+                        "the next without lifting. The outer ring is major chords, the middle their relative minors, the inner " +
+                        "diminished: change them below. The buttons under the wheel add a 7th, 9th, 6th..."
+                        else "The left of the pad is a grid of chords: the roots across, a chord type in each row. Touch one and " +
+                        "the pad holds only its notes; slide to the next without lifting. Change the rows below.",
+                        color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                    ChordLayoutEditor(side, s, accent)
                 }
             }
-        }
-    }
+        },
+        Option("Up/down", PadSettings.VERTICAL[s.vertical]) {
+            Chips(PadSettings.VERTICAL, s.vertical, accent) { k -> set { it.copy(vertical = k) } }
+            Text(when (s.vertical) {
+                1 -> "Higher up the screen is brighter. Loudness stays the same."
+                else -> "The height of a finger sets its loudness: the same height is always the same loudness."
+            }, color = TextDim, fontSize = 12.sp)
+            if (s.vertical != 1) {
+                Text("Fade to silence", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                Chips(PadSettings.FADE, s.fade, accent) { k -> set { it.copy(fade = k) } }
+                Text(if (s.fade == 0) "The bottom edge is quiet but not silent."
+                     else "The bottom edge is silent, so sliding down fades a note out. A longer fade spreads " +
+                          "it over more of the pad.", color = TextDim, fontSize = 12.sp)
+            }
+        },
+        Option("Glide", PadSettings.glideName(s.glide)) {
+            LabeledSlider("Glide", s.glide, 0f..1f, PadSettings.glideName(s.glide), accent = accent, steps = 19) { v ->
+                set { it.copy(glide = v) } }
+            Text(when {
+                s.glide <= 0.005f -> "Snap: each column plays its note, and a finger moving across goes straight " +
+                                     "from one note to the next, with no bend in between."
+                s.glide >= 0.995f -> "Free: pitch follows the finger exactly, like a fretless string."
+                else -> "The middle of each column plays its note; nearer the edges the pitch glides to the next. " +
+                        "Higher glides over more of the column."
+            }, color = TextDim, fontSize = 12.sp)
+        },
+        Option("Vibrato", PadSettings.VIBRATO[s.vibrato]) {
+            Chips(PadSettings.VIBRATO, s.vibrato, accent) { k -> set { it.copy(vibrato = k) } }
+            if (s.vibrato != 0) {
+                Text("Sensitivity", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                Chips(PadSettings.VIB_SENSE, s.vibSense, accent) { k -> set { it.copy(vibSense = k) } }
+            }
+            Text(if (s.vibrato == 0) "The pitch moves only as far as the finger does."
+                 else "Rock a held finger from side to side: the small wobble is made bigger, so a vibrato " +
+                      "needs only a roll of the fingertip. Higher sensitivity needs a smaller roll. Slides are left alone.",
+                 color = TextDim, fontSize = 12.sp)
+            Text("A shake of the phone can add vibrato too, with any controller: Gyro.", color = TextDim, fontSize = 12.sp,
+                 modifier = Modifier.padding(top = 6.dp))
+        },
+        Option("Arp", if (arp.on) ARP_ORDERS[arp.order.coerceIn(ARP_ORDERS.indices)] else "Off") {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                ArpControls(arp, accent) { c -> TouchPad.updateArp(side, c) }
+                val bpm = AppState.perf.bpm
+                LabeledSlider("Tempo", bpm, 40f..220f, "${bpm.roundToInt()} bpm", accent = accent) { v ->
+                    AppState.update { it.copy(bpm = v.roundToInt().toFloat()) } }
+            }
+        },
+        Option("Look", if (Eink) "E-ink" else PAD_THEMES[TouchPad.pad.theme].name, perPart = false) {
+            val p0 = TouchPad.pad
+            if (Eink) Text("E-ink is on (Settings), so the pad is black on white with no motion.", color = TextDim, fontSize = 12.sp)
+            else Chips(PAD_THEMES.map { it.name }, p0.theme) { k -> TouchPad.update(0) { it.copy(theme = k) } }
+            Text("Lines", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            Chips(PadSettings.LINES, p0.lines) { k -> TouchPad.update(0) { it.copy(lines = k) } }
+        },
+        // Not panels: one tap each. Split makes two pads, each with its own sound and settings.
+        Option("Split", if (split) "Two pads" else "One pad", perPart = false, on = split, tap = { TouchPad.changeSplit(!split) }),
+        // Lock: the note strip plays instead of moving the notes, so a stray touch cannot move them.
+        Option(if (locked) "Locked" else "Lock", if (locked) "Strip plays" else "Strip moves", perPart = false, on = locked,
+               tap = { TouchPad.update(0) { it.copy(locked = !it.locked) } }),
+    ).map { if (split) it else it.copy(perPart = false) }
 }
 
 @Composable
@@ -628,7 +483,7 @@ private class Pad {
         val lx = z.local(x)
         val col = columnAt(cols, lx)
         // The engine adds the app's transpose (set for the Seaboard): take it off so the pad plays what it shows.
-        val note = (cols[col] - AppState.transpose).coerceIn(0, 127)
+        val note = (cols[col] - AppState.shape.transpose).coerceIn(0, 127)
         val y0 = y.coerceIn(0f, 1f)
         val f = Finger(ch, note, zi, cols, lx, y0)
         f.col = col
@@ -661,12 +516,12 @@ private class Pad {
     }
 
     fun move(id: Long, x: Float, y: Float) {
-        if (id == divider) { AppState.changePadSplit(x); return }
+        if (id == divider) { TouchPad.changeSplitAt(x); return }
         grabs[id]?.let { g ->
             val z = zones.getOrNull(g.zone) ?: return
             val shift = (g.shift - ((x - g.x) / z.w * z.columns.size).roundToInt())
                 .coerceIn(z.shiftRange.first.coerceAtMost(g.shift), z.shiftRange.last.coerceAtLeast(g.shift))
-            if (shift != z.s.shift) AppState.updatePad(z.part) { it.copy(shift = shift) }
+            if (shift != z.s.shift) TouchPad.update(z.part) { it.copy(shift = shift) }
             return
         }
         val f = fingers[id] ?: return
@@ -753,8 +608,8 @@ private class Pad {
     }
 
     private fun sendExpression(f: Finger) {
-        val range = AppState.bendRange.coerceAtLeast(1f)
-        val semis = f.pitch - (f.note + AppState.transpose)
+        val range = AppState.shape.bendRange.coerceAtLeast(1f)
+        val semis = f.pitch - (f.note + AppState.shape.transpose)
         val bend = (8192 + semis / range * 8192).roundToInt().coerceIn(0, 16383)
         val (p, sl, vol) = expression(f)
         val pressure = (p * 127).roundToInt().coerceIn(0, 127)
@@ -849,7 +704,7 @@ private class Pad {
             val b = 5 * i
             if (ext[b].toInt() in mine) continue
             // In a split a controller's note goes by the split point: draw it on that part's pad.
-            val zi = if (split && ext[b + 1].toInt() >= AppState.perf.splitNote) 1 else 0
+            val zi = if (split && ext[b + 1].toInt() >= AppState.shape.splitNote) 1 else 0
             val z = zones.getOrNull(zi) ?: zones[0]
             val ex = xAt(z, ext[b + 2] + mod.bend)
             if (ex < 0) continue

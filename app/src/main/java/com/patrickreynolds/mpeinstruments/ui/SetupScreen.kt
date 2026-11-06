@@ -34,50 +34,17 @@ class SetupActions(
     val stop: () -> Unit,
 )
 
+/**
+ * Settings: what belongs to the app and the phone rather than to a controller or a preset. The
+ * MIDI devices are here as well as on External MIDI's rail: a device can play beside any
+ * controller.
+ */
 @Composable
 fun SetupScreen(stats: Stats?, actions: SetupActions, @Suppress("UNUSED_PARAMETER") midiTick: Int) {
     Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 10.dp)) {
-        SectionCard("Controller") {
-            val connected = MidiConnector.connectedName
-            val waiting = MidiConnector.reconnecting
-            Text(when {
-                connected.isNotEmpty() -> connected
-                waiting.isNotEmpty() -> "Waiting for $waiting (Bluetooth)…"
-                else -> "Nothing connected"
-            }, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = if (connected.isNotEmpty()) PartColors[1] else Color.Unspecified)
-            if (connected.isNotEmpty()) OutlinedButton(onClick = { MidiConnector.disconnect() }, modifier = Modifier.padding(top = 6.dp)) {
-                Text("Disconnect")
-            }
-            for (info in MidiConnector.devices().filter { it.id != MidiConnector.connectedId })
-                OutlinedButton(onClick = { MidiConnector.connect(info) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                    Text("Connect ${MidiConnector.name(info)}")
-                }
-            for (d in actions.bleFound)
-                OutlinedButton(onClick = { MidiConnector.connectBluetooth(d) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                    Text("Connect ${d.name ?: d.address} (Bluetooth)")
-                }
-            Button(onClick = actions.scan, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                   colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = PartColors[1]), border = ButtonEdge) {
-                Text(if (actions.scanning) "Looking for Bluetooth controllers…" else "Find a Bluetooth controller")
-            }
-            Text("USB: plug the Seaboard in and it connects by itself. Bluetooth: switch the Seaboard on, then find it here once.",
-                 color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-            SwitchRow("Reconnect by itself", MidiConnector.autoBluetooth,
-                      "Plays the moment the Bluetooth controller is on, also with the app in the background", accent = PartColors[1]) {
-                MidiConnector.autoBluetooth = it
-            }
-        }
-        SectionCard("Controller settings") {
-            val ranges = listOf(48f, 24f, 12f, 2f)
-            Text("Pitch bend range (the Seaboard sends ±48)", color = TextDim, fontSize = 13.sp)
-            Chips(ranges.map { "±${it.toInt()}" }, ranges.indexOf(AppState.bendRange)) { AppState.changeBendRange(ranges[it]) }
-            val dogs = listOf(-1, 0, 500, 1500, 3000)
-            Text("Release notes when the link goes silent", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-            Chips(dogs.map { when (it) { -1 -> "Auto"; 0 -> "Off"; else -> "${it} ms" } }, dogs.indexOf(MidiConnector.watchdogSetting)) {
-                MidiConnector.watchdogSetting = dogs[it]
-            }
-            Text("Auto: 1.5 s on Bluetooth, where a lost link is not reported for up to 30 s; off on USB.",
-                 color = TextDim, fontSize = 12.sp)
+        SectionCard("MIDI devices") {
+            MidiDevices()
+            LinkWatchdog()
         }
         SectionCard("Look") {
             Segmented(listOf("Dark", "E-ink"), if (AppState.eink) 1 else 0) { AppState.changeEink(it == 1) }

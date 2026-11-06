@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.AppState
 import com.patrickreynolds.mpeinstruments.Chords
+import com.patrickreynolds.mpeinstruments.controllers.TouchPad
 import com.patrickreynolds.mpeinstruments.PadSettings
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -58,9 +59,9 @@ fun ChordPicker(side: Int, s: PadSettings, t: PadTheme, modifier: Modifier) {
 
 /** Play a chord on pad [side]: from now on its notes are this chord's (and fingers held there follow it). */
 private fun pick(side: Int, root: Int, type: String) {
-    val p = AppState.pads[side]
+    val p = TouchPad.pads[side]
     if (p.chordRoot == root && p.chordType == type) return
-    AppState.updatePad(side) { it.copy(chordRoot = root, chordType = type) }
+    TouchPad.update(side) { it.copy(chordRoot = root, chordType = type) }
 }
 
 /**
@@ -220,7 +221,7 @@ private fun ChordWheel(side: Int, s: PadSettings, t: PadTheme) {
                 Box(Modifier.background(if (on) accent.copy(alpha = if (t.flat) 1f else 0.3f) else Color.Transparent, RoundedCornerShape(50))
                         .border(BorderStroke(1.dp, if (on) accent else ink.copy(alpha = 0.4f)), RoundedCornerShape(50))
                         .pointerInput(on, side) { detectTapGestures(onPress = {
-                            AppState.updatePad(side) { it.copy(chordMod = if (on) "" else m) } }) }
+                            TouchPad.update(side) { it.copy(chordMod = if (on) "" else m) } }) }
                         .padding(horizontal = 9.dp, vertical = 5.dp)) {
                     Text(m, fontSize = 12.sp, color = if (on && t.flat) Color.White else if (on) accent else ink)
                 }
@@ -299,7 +300,7 @@ fun ChordLayoutEditor(side: Int, s: PadSettings, accent: Color) {
         Text(g, color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
         Chips(types, types.indexOf(current), accent) { k ->
             val type = types[k]
-            AppState.updatePad(side) { p ->
+            TouchPad.update(side) { p ->
                 // A new type lines its roots up the natural way (changed below if you like).
                 if (wheel) p.copy(wheelRings = p.wheelRings.mapIndexed { i, x -> if (i == which) type else x },
                                   wheelAlign = p.wheelAlign.mapIndexed { i, x -> if (i == which && i > 0) naturalAlign(type) else x })
@@ -310,7 +311,7 @@ fun ChordLayoutEditor(side: Int, s: PadSettings, accent: Color) {
     if (wheel && which > 0) {
         Text("Its roots, from the outer ring's", color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
         Chips(Chords.ALIGN.map { it.second }, Chords.ALIGN.indexOfFirst { it.first == s.wheelAlign[which] }, accent) { k ->
-            AppState.updatePad(side) { p -> p.copy(wheelAlign = p.wheelAlign.mapIndexed { i, x -> if (i == which) Chords.ALIGN[k].first else x }) }
+            TouchPad.update(side) { p -> p.copy(wheelAlign = p.wheelAlign.mapIndexed { i, x -> if (i == which) Chords.ALIGN[k].first else x }) }
         }
     }
 }

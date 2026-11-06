@@ -50,23 +50,41 @@ import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.AppState
 import com.patrickreynolds.mpeinstruments.Native
 import com.patrickreynolds.mpeinstruments.Stats
-import com.patrickreynolds.mpeinstruments.noteName
-import kotlin.math.roundToInt
+import com.patrickreynolds.mpeinstruments.MidiConnector
+import com.patrickreynolds.mpeinstruments.Preset
+import com.patrickreynolds.mpeinstruments.controllers.Controllers
+import com.patrickreynolds.mpeinstruments.controllers.TouchPad
 
+/**
+ * Play: the controller you play with (and the way into it, full screen), the others to switch
+ * to, and what is loaded: the preset, its sounds, the volume.
+ */
 @Composable
-fun PlayScreen(stats: Stats?, openPad: () -> Unit, openSetup: () -> Unit) {
+fun PlayScreen(stats: Stats?, openPlay: () -> Unit, openSetup: () -> Unit) {
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
         UpdateBanner(openSetup)
-        PadCard(openPad)
-        OctaveWarning(stats)
-        val perf = AppState.perf
-        val parts = if (perf.layout == 0) listOf(0) else listOf(0, 1)
-        SectionCard(if (parts.size == 1) "Instrument" else "Instruments") {
-            for (k in parts) InstrumentRow(k, label = partLabel(k, perf.layout))
+        ControllerCard(openPlay)
+        Column(Modifier.padding(horizontal = 16.dp)) { OctaveWarning(stats) }
+        SectionCard("Controllers") {
+            for (c in Controllers.all) {
+                val on = c === AppState.controller
+                Row(Modifier.fillMaxWidth().clickable { AppState.switchController(c) }.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(c.name, fontSize = 17.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                             color = if (on) PartColors[0] else Color.Unspecified)
+                        Text(c.description, color = TextDim, fontSize = 12.sp)
+                    }
+                    Text(if (on) "In use" else "Use", color = if (on) TextDim else PartColors[0], fontSize = 13.sp)
+                }
+            }
+            Text("Built in. Each keeps its own settings; the sound, effects, loops and presets are shared.",
+                 color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         }
-        SectionCard("Play") {
+        val parts = if (AppState.twoParts) listOf(0, 1) else listOf(0)
+        SectionCard(AppState.presetName.ifEmpty { "Playing" }) {
+            for (k in parts) InstrumentRow(k, label = partLabel(k))
             LabeledSlider("Volume", AppState.volume, 0f..1f, pct(AppState.volume)) { AppState.changeVolume(it) }
-            TransposeRow()
             Spacer(Modifier.height(8.dp))
             Button(onClick = { Native.nativePanic() }, modifier = Modifier.fillMaxWidth(),
                    colors = ButtonDefaults.buttonColors(containerColor = PanelHigh, contentColor = Fg), border = ButtonEdge) {
@@ -76,29 +94,33 @@ fun PlayScreen(stats: Stats?, openPad: () -> Unit, openSetup: () -> Unit) {
     }
 }
 
-/** The way into the fullscreen touch pad. */
+/** The controller in use, and the way into it. */
 @Composable
-private fun PadCard(open: () -> Unit) {
+private fun ControllerCard(open: () -> Unit) {
+    val c = AppState.controller
+    val pad = c === TouchPad
     Card(Modifier.fillMaxWidth().padding(16.dp).height(150.dp).clickable(onClick = open), shape = RoundedCornerShape(22.dp),
          colors = CardDefaults.cardColors(containerColor = Panel),
          border = if (Eink) androidx.compose.foundation.BorderStroke(Edge, Line) else null) {
         Box(Modifier.fillMaxSize()) {
             Canvas(Modifier.fillMaxSize()) {
                 if (!Eink) drawRect(Brush.linearGradient(listOf(Color(0xFF2A1F3D), Color(0xFF0E1014), Color(0xFF0F2A30))))
-                for (i in 0 until 8) {
-                    val x = (i + 0.5f) * size.width / 8
-                    drawLine(if (Eink) Color.Black.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.08f),
+                val lines = if (pad) 8 else 25
+                for (i in 0 until lines) {
+                    val x = (i + 0.5f) * size.width / lines
+                    drawLine(if (Eink) Color.Black.copy(alpha = 0.3f) else Color.White.copy(alpha = if (pad || i % 12 == 0) 0.08f else 0.04f),
                              Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
                 }
-                if (!Eink) for ((k, c) in PartColors.withIndex()) {
+                if (!Eink) for ((k, col) in PartColors.withIndex()) {
                     val at = Offset(size.width * (0.62f + 0.2f * k), size.height * (0.38f + 0.25f * k))
-                    drawCircle(Brush.radialGradient(listOf(c.copy(alpha = 0.6f), c.copy(alpha = 0f)), center = at, radius = 90f), 90f, at)
+                    drawCircle(Brush.radialGradient(listOf(col.copy(alpha = 0.6f), col.copy(alpha = 0f)), center = at, radius = 90f), 90f, at)
                     drawCircle(Color.White.copy(alpha = 0.9f), 10f, at)
                 }
             }
             Column(Modifier.align(Alignment.CenterStart).padding(20.dp)) {
-                Text("Touch pad", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-                Text("Play with your fingers, full screen", color = TextDim, fontSize = 13.sp)
+                Text(c.name, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                Text(if (pad) "Play with your fingers, full screen"
+                     else MidiConnector.connectedName.ifEmpty { "Nothing connected yet" }, color = TextDim, fontSize = 13.sp)
                 Spacer(Modifier.height(10.dp))
                 Button(onClick = open, colors = ButtonDefaults.buttonColors(containerColor = PartColors[0], contentColor = Ink)) {
                     Text("Play")
@@ -108,43 +130,31 @@ private fun PadCard(open: () -> Unit) {
     }
 }
 
-fun partLabel(k: Int, layout: Int) = when (layout) { 1 -> if (k == 0) "Left" else "Right"; 2 -> if (k == 0) "Main" else "Layer"; else -> "" }
+/** A part's name, when there are two: the split's ("Left", "Right"), or "Main" and "Layer". */
+fun partLabel(k: Int) = if (!AppState.twoParts) "" else (AppState.controller.splitNames ?: listOf("Main", "Layer"))[k]
 
+/** Library: your presets and the built-in ones, and the sounds there are. */
 @Composable
-fun TransposeRow() {
-    val t = AppState.transpose
-    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("Transpose", fontSize = 14.sp, modifier = Modifier.weight(1f))
-        for ((label, d) in listOf("−oct" to -12, "−1" to -1)) TextButton(onClick = { AppState.changeTranspose(t + d) }) { Text(label) }
-        Text(if (t == 0) "0" else "%+d".format(t), modifier = Modifier.width(44.dp), fontWeight = FontWeight.SemiBold,
-             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        for ((label, d) in listOf("+1" to 1, "+oct" to 12)) TextButton(onClick = { AppState.changeTranspose(t + d) }) { Text(label) }
-    }
-}
-
-/**
- * The Seaboard's notes can come in octaves away from the instrument (its octave buttons, or a
- * setting in ROLI's app): then everything sounds strained or at one pitch. Offer the fix.
- */
-@Composable
-fun OctaveWarning(stats: Stats?) {
-    val inst = AppState.instrument(0) ?: return
-    val center = stats?.noteCenter ?: return
-    if (center < 0) return
-    val playing = center + AppState.transpose + AppState.perf.part(0).transpose
-    val octaves = ((inst.centerNote - playing) / 12.0).roundToInt()
-    if (kotlin.math.abs(octaves) < 2) return
-    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), shape = RoundedCornerShape(18.dp),
-         colors = CardDefaults.cardColors(containerColor = Warn.copy(alpha = if (Eink) 0f else 0.14f)),
-         border = if (Eink) androidx.compose.foundation.BorderStroke(Edge, Line) else null) {
-        Column(Modifier.padding(16.dp)) {
-            Text("Your notes are ${kotlin.math.abs(octaves)} octaves ${if (octaves < 0) "above" else "below"} the ${inst.name.lowercase()}",
-                 color = Warn, fontWeight = FontWeight.SemiBold)
-            Text("Check the octave buttons on the Seaboard, or transpose here.", color = TextDim, fontSize = 13.sp)
-            Spacer(Modifier.height(8.dp))
-            Button(onClick = { AppState.changeTranspose(AppState.transpose + 12 * octaves) },
-                   colors = ButtonDefaults.buttonColors(containerColor = Warn, contentColor = Ink)) {
-                Text("Transpose ${if (octaves > 0) "+" else "−"}${kotlin.math.abs(octaves)} octaves")
+fun LibraryScreen() {
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 10.dp)) {
+        SectionCard("Presets") { PresetLibrary(PartColors[0]) }
+        SectionCard("Sounds") {
+            Text("The instruments there are. Pick one for what you play on the rail's Sound, or here for the " +
+                 (if (AppState.twoParts) "${partLabel(AppState.part).lowercase()} part." else "sound in use."),
+                 color = TextDim, fontSize = 12.sp)
+            val k = AppState.part
+            for ((group, list) in AppState.instruments.groupBy { it.group }) {
+                Text(group.uppercase(), color = TextDim, fontSize = 12.sp, letterSpacing = 1.2.sp,
+                     modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+                for (i in list) {
+                    val chosen = i.id == AppState.perf.part(k).instrument
+                    Column(Modifier.fillMaxWidth().clickable { AppState.updatePart(k) { it.copy(instrument = i.id) } }
+                               .padding(vertical = 8.dp)) {
+                        Text(i.name, fontSize = 17.sp, color = if (chosen) PartColors[k] else Color.Unspecified,
+                             fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal)
+                        Text(i.description, color = TextDim, fontSize = 13.sp)
+                    }
+                }
             }
         }
     }
@@ -197,13 +207,17 @@ fun PresetSheet(onClose: () -> Unit) {
     }
 }
 
-internal fun presetSummary(p: com.patrickreynolds.mpeinstruments.Perf): String {
+internal fun presetSummary(p: Preset): String {
     fun name(id: String) = AppState.instruments.firstOrNull { it.id == id }?.name ?: id
-    val a = p.part(0); val b = p.part(1)
-    fun desc(x: com.patrickreynolds.mpeinstruments.Part) = name(x.instrument) + if (x.arp) " arp" else ""
-    return when (p.layout) {
-        1 -> "${desc(a)} | ${desc(b)}, split at ${noteName(p.splitNote)}"
-        2 -> "${desc(a)} + ${desc(b)}"
-        else -> desc(a)
-    } + if (p.scale != 0) ", in key" else ""
+    val s = p.settings?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+    val pad = p.controller == TouchPad.id
+    val split = pad && s?.optBoolean("split") == true
+    fun desc(k: Int) = name(p.perf.part(k).instrument) +
+        if (pad && s?.optJSONObject("arp$k")?.optBoolean("arp") == true) " arp" else ""
+    val sound = when {
+        split -> "${desc(0)} | ${desc(1)}"
+        p.perf.layered -> "${desc(0)} + ${name(p.perf.part(1).instrument)}"
+        else -> desc(0)
+    }
+    return sound + (p.controller?.let { " · " + Controllers.byId(it).name } ?: "")
 }

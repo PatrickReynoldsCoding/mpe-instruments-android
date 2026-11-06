@@ -303,15 +303,15 @@ fun BreathControls(r: ModReading) {
 }
 
 /**
- * Setup tab, Experimental: the gyro and breath, with what they are doing. New, and tried on an
- * emulator but not yet on many phones. Once one is on, it is also on the touch pad's rail.
+ * Settings tab, Experimental: the gyro and breath, with what they are doing. New, and tried on an
+ * emulator but not yet on many phones. Once one is on, it is also on the play screen's rail.
  */
 @Composable
 fun ExperimentalCard() {
     val r = liveModReading()
     SectionCard("Experimental", accent = Warn) {
-        Text("New and still being tuned: try them and see how they feel. They work on every instrument, from the touch pad " +
-             "or a controller. Once one is on, it also appears on the touch pad's side rail.", color = TextDim, fontSize = 12.sp)
+        Text("New and still being tuned: try them and see how they feel. They work with every controller and every " +
+             "instrument (a shake can add vibrato to any of them). Once one is on, it also appears on the play screen's rail.", color = TextDim, fontSize = 12.sp)
         Spacer(Modifier.height(12.dp))
         Text("Gyro (the phone's motion)", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))

@@ -5,6 +5,10 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.patrickreynolds.mpeinstruments.controllers.Controller
+import com.patrickreynolds.mpeinstruments.controllers.Controllers
+import com.patrickreynolds.mpeinstruments.controllers.ExternalMidi
+import com.patrickreynolds.mpeinstruments.controllers.TouchPad
 import com.patrickreynolds.mpeinstruments.ui.DarkPalette
 import com.patrickreynolds.mpeinstruments.ui.EinkPalette
 import com.patrickreynolds.mpeinstruments.ui.palette
@@ -12,33 +16,35 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * A preset is a whole touch pad: its sounds and effects (the performance), and the pads' layout
- * (notes, scale, glide, up/down, vibrato, split). How the pad looks and the lock stay as they are.
- * Built-in presets have no layout of their own: loading one keeps the pads as they are.
+ * A preset: the sound (parts, layer, tempo, effects), the controller it is played with and that
+ * controller's settings (the touch pad's notes, split and arps, say). [controller] null (some
+ * built-in presets): any controller, the one in use, with what is per preset turned off.
+ * [settings] is kept as JSON text, so two presets compare by value.
  */
-data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false, val pad: PadLayout? = null) {
-    fun json(): JSONObject = JSONObject().put("name", name).put("perf", perf.json()).apply { pad?.let { put("pad", it.json()) } }
-    companion object {
-        fun from(o: JSONObject) = Preset(o.getString("name"), Perf.from(o.getJSONObject("perf")),
-                                         pad = o.optJSONObject("pad")?.let { PadLayout.from(it) })
+data class Preset(val name: String, val perf: Perf, val builtIn: Boolean = false,
+                  val controller: String? = TouchPad.id, val settings: String? = null) {
+    fun json(): JSONObject = JSONObject().put("name", name).put("perf", perf.json()).apply {
+        controller?.let { put("controller", it) }
+        settings?.let { put("settings", JSONObject(it)) }
     }
-}
-
-/** Both pads' settings and where a split divides them. */
-data class PadLayout(val pads: List<PadSettings>, val splitAt: Float) {
-    fun json(): JSONObject = JSONObject().put("left", pads[0].json()).put("right", pads[1].json()).put("splitAt", splitAt.toDouble())
     companion object {
-        fun from(o: JSONObject): PadLayout {
-            val l = PadSettings.from(o.optJSONObject("left"))
-            return PadLayout(listOf(l, PadSettings.from(o.optJSONObject("right"), l)),
-                             o.optDouble("splitAt", 0.5).toFloat().coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN))
+        fun from(o: JSONObject): Preset {
+            val perf = o.getJSONObject("perf")
+            if (o.has("controller")) return Preset(o.getString("name"), Perf.from(perf), controller = o.getString("controller"),
+                                                   settings = o.optJSONObject("settings")?.toString())
+            // Before 0.16: a touch pad preset, the pads (if it had them) beside the performance.
+            val pad = o.optJSONObject("pad")
+            val s = TouchPad.legacy(pad?.optJSONObject("left"), pad?.optJSONObject("right"),
+                                    pad?.optDouble("splitAt", 0.5)?.toFloat(), perf)
+            return Preset(o.getString("name"), Perf.from(perf), settings = s.toString())
         }
     }
 }
 
 /**
- * What the screen shows and the engine plays. Every change goes to the engine at once and is
- * saved, so the app (and the background service) start where they left off.
+ * The app around the controller: what the engine plays and the screen shows. Every change goes
+ * to the engine at once and is saved, so the app (and the background service) start where they
+ * left off.
  */
 object AppState {
     private lateinit var prefs: SharedPreferences
@@ -51,31 +57,29 @@ object AppState {
         private set
     var volume by mutableStateOf(0.8f)
         private set
-    var transpose by mutableStateOf(0)
-        private set
-    var bendRange by mutableStateOf(48f)
-        private set
     var presetName by mutableStateOf("")
         private set
     var userPresets by mutableStateOf<List<Preset>>(emptyList())
         private set
-    /** Set the split point from the next note played. */
-    var learningSplit by mutableStateOf(false)
-    /** The on-screen pads (left and right when split); not part of a preset. */
-    var pads by mutableStateOf(listOf(PadSettings(), PadSettings()))
+
+    /** The controller in use: its options are on the rail and its surface is what you play. */
+    var controller by mutableStateOf<Controller>(TouchPad)
         private set
-    /** The left pad, which also holds the settings of the screen as a whole (theme, lines, lock). */
-    val pad get() = pads[0]
-    /** Where a split pad divides the screen, 0..1 across the playing area. */
-    var padSplitAt by mutableStateOf(0.5f)
+    /** What the controller sets in the engine beside the sound. */
+    val shape get() = controller.shape
+    /** Two parts sound: split by the controller, or layered. */
+    val twoParts get() = perf.layout(shape) != 0
+    /** Which part (sound) the rail is changing: 0, or 1 (the right of a split, the layer). */
+    var side by mutableStateOf(0)
+    val part get() = if (twoParts) side.coerceIn(0, 1) else 0
+    /** The rail tucked away, the whole screen to play on. */
+    var railHidden by mutableStateOf(false)
         private set
-    /** Which pad of a split the rail is changing: 0 left, 1 right. */
-    var padSide by mutableStateOf(0)
 
     /** The built-in preset on view was changed since it was loaded (a built-in is not changed itself). */
     var presetEdited by mutableStateOf(false)
         private set
-    /** The loop buttons on the touch pad, and whether a loop's length snaps to beats. */
+    /** The loop buttons on the play screen, and whether a loop's length snaps to beats. */
     var loopDock by mutableStateOf(true)
         private set
     var loopSnap by mutableStateOf(true)
@@ -84,7 +88,7 @@ object AppState {
     var loopLayers by mutableStateOf(List(Looper.LOOPS) { List(Looper.MAX_LAYERS) { 1f to false } })
         private set
 
-    /** Tilt and breath: the phone as a controller; not part of a preset. */
+    /** Gyro and breath: the phone itself as a controller, beside any; not part of a preset. */
     var mods by mutableStateOf(PhoneMods())
         private set
 
@@ -98,47 +102,55 @@ object AppState {
         appContext = context.applicationContext
         prefs = appContext.getSharedPreferences("mpe", Context.MODE_PRIVATE)
         instruments = Native.instruments()
-        perf = runCatching { Perf.from(prefs.getString("perf", null)?.let { JSONObject(it) }) }.getOrDefault(Perf())
+        val perfJson = runCatching { prefs.getString("perf", null)?.let { JSONObject(it) } }.getOrNull()
+        perf = runCatching { Perf.from(perfJson) }.getOrDefault(Perf())
         // Before presets existed the instrument was saved as an index.
         if (!prefs.contains("perf") && prefs.contains("instrument"))
             instruments.getOrNull(prefs.getInt("instrument", -1))?.let { inst -> perf = perf.withPart(0) { it.copy(instrument = inst.id) } }
         volume = prefs.getFloat("volume", 0.8f)
-        transpose = prefs.getInt("transpose", 0)
-        bendRange = prefs.getFloat("bend", 48f)
         presetName = prefs.getString("preset", "") ?: ""
         eink = prefs.getBoolean("eink", false)
         palette = if (eink) EinkPalette else DarkPalette
-        val p0 = runCatching { PadSettings.from(prefs.getString("pad", null)?.let { JSONObject(it) }) }.getOrDefault(PadSettings())
-        val p1 = runCatching { PadSettings.from(prefs.getString("pad2", null)?.let { JSONObject(it) }, p0.copy(shift = 0)) }.getOrDefault(p0)
-        pads = listOf(p0, p1)
-        padSplitAt = prefs.getFloat("padSplitAt", 0.5f).coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN)
         mods = runCatching { PhoneMods.from(prefs.getString("mods", null)?.let { JSONObject(it) }) }.getOrDefault(PhoneMods())
         loopDock = prefs.getBoolean("loopDock", true)
         loopSnap = prefs.getBoolean("loopSnap", true)
+        if (!prefs.contains("ctl.${TouchPad.id}")) migrateToControllers(perfJson)
+        for (c in Controllers.all) runCatching { c.load(prefs.getString("ctl.${c.id}", null)?.let { JSONObject(it) }) }
+        controller = Controllers.byId(prefs.getString("controller", TouchPad.id))
+        railHidden = prefs.getBoolean("railHidden", false)
         userPresets = runCatching {
             val a = JSONArray(prefs.getString("presets", "[]"))
             (0 until a.length()).map { Preset.from(a.getJSONObject(it)) }
         }.getOrDefault(emptyList())
         if (!prefs.getBoolean("presetsStarted", false)) startPresets()
-        // Until 0.15.1 pitch assist dragged notes outside its scale out of tune, and two built-in
-        // presets turned it on: turn it off once, everywhere (Perform turns it back on).
+        // Until 0.15.1 pitch assist dragged notes outside its scale out of tune: turn it off once.
         if (!prefs.getBoolean("assistOff", false)) {
-            perf = perf.copy(scale = 0)
-            userPresets = userPresets.map { it.copy(perf = it.perf.copy(scale = 0)) }
+            ExternalMidi.update { it.copy(scale = 0) }
             if (presetName == "Violin, in tune") presetName = ""
-            prefs.edit().putBoolean("assistOff", true).putString("perf", perf.json().toString()).apply()
-            savePresets()
+            prefs.edit().putBoolean("assistOff", true).apply()
         }
         applyAll()
+    }
+
+    /**
+     * Before 0.16 the touch pad's settings and the Seaboard's were the app's: the pads, the split
+     * and the arps go to the touch pad; the bend range, transpose and pitch assist to External MIDI.
+     */
+    private fun migrateToControllers(perfJson: JSONObject?) {
+        fun json(key: String) = runCatching { prefs.getString(key, null)?.let { JSONObject(it) } }.getOrNull()
+        val left = json("pad")
+        val pad = TouchPad.legacy(left, json("pad2"), prefs.getFloat("padSplitAt", 0.5f), perfJson)
+        val midi = ExternalMidi.legacy(prefs.getFloat("bend", 48f), prefs.getInt("transpose", 0), perfJson)
+        prefs.edit().putString("ctl.${TouchPad.id}", pad.toString()).putString("ctl.${ExternalMidi.id}", midi.toString())
+            .putBoolean("railHidden", left?.optBoolean("hideRail", false) ?: false)
+            .putString("controller", TouchPad.id).apply()
     }
 
     /** Send everything to the engine (at start, and after the audio engine was rebuilt). */
     fun applyAll() {
         Native.nativeSetVolume(volume)
-        Native.nativeSetTranspose(transpose)
-        Native.nativeSetBendRange(bendRange)
-        applyInstruments(null)
-        Native.nativeSetPerformance(perf.toArray())
+        partOneBuilt = false
+        applyEngine(null)
         PhoneControl.apply(appContext, mods)
         Looper.snap(loopSnap)
     }
@@ -148,22 +160,27 @@ object AppState {
 
     fun instrument(part: Int) = instruments.getOrNull(index(perf.part(part).instrument))
 
-    private fun applyInstruments(old: Perf?) {
-        for (k in 0..1) {
-            val id = perf.part(k).instrument
-            // Part 1 is only built when a split or layer needs it: 15 more copies of an instrument.
-            if (k == 1 && perf.layout == 0) continue
-            if (old == null || old.part(k).instrument != id || (k == 1 && old.layout == 0))
-                Native.nativeSetPartInstrument(k, index(id))
+    /** Part 1 is only built when a split or layer needs it: 15 more copies of an instrument. */
+    private var partOneBuilt = false
+
+    /** The sound and the controller's shape to the engine; instruments only where they changed. */
+    private fun applyEngine(old: Perf?) {
+        val s = shape
+        Native.nativeSetTranspose(s.transpose)
+        Native.nativeSetBendRange(s.bendRange)
+        if (old == null || old.part(0).instrument != perf.part(0).instrument) Native.nativeSetPartInstrument(0, index(perf.part(0).instrument))
+        if (twoParts && (!partOneBuilt || old == null || old.part(1).instrument != perf.part(1).instrument)) {
+            Native.nativeSetPartInstrument(1, index(perf.part(1).instrument))
+            partOneBuilt = true
         }
+        Native.nativeSetPerformance(perf.toArray(s))
     }
 
     fun update(change: (Perf) -> Perf) {
         val old = perf
         perf = change(perf)
         if (perf == old) return
-        applyInstruments(old)
-        Native.nativeSetPerformance(perf.toArray())
+        applyEngine(old)
         touched()
         save()
     }
@@ -171,18 +188,14 @@ object AppState {
     fun updatePart(i: Int, change: (Part) -> Part) = update { it.withPart(i, change) }
 
     fun changeVolume(v: Float) { volume = v; Native.nativeSetVolume(v); prefs.edit().putFloat("volume", v).apply() }
-    fun changeTranspose(v: Int) {
-        transpose = v.coerceIn(-60, 60)
-        Native.nativeSetTranspose(transpose)
-        prefs.edit().putInt("transpose", transpose).apply()
-    }
-    fun changeBendRange(v: Float) { bendRange = v; Native.nativeSetBendRange(v); prefs.edit().putFloat("bend", v).apply() }
 
     fun changeEink(on: Boolean) {
         eink = on
         palette = if (on) EinkPalette else DarkPalette
         prefs.edit().putBoolean("eink", on).apply()
     }
+
+    fun changeRailHidden(on: Boolean) { railHidden = on; prefs.edit().putBoolean("railHidden", on).apply() }
 
     fun updateMods(change: (PhoneMods) -> PhoneMods) {
         val old = mods
@@ -196,22 +209,38 @@ object AppState {
     }
     private val saveMods = Runnable { prefs.edit().putString("mods", mods.json().toString()).apply() }
 
-    /** Change one pad: 0 left (or the only one), 1 right. */
-    fun updatePad(side: Int = 0, change: (PadSettings) -> PadSettings) {
-        val now = change(pads[side])
-        if (now == pads[side]) return
-        pads = pads.mapIndexed { k, p -> if (k == side) now else p }
-        prefs.edit().putString(if (side == 0) "pad" else "pad2", now.json().toString()).apply()
-        touched()
+    // ---- controllers --------------------------------------------------------------------------
+
+    /**
+     * A controller's settings changed: save them, keep them in the preset on view if it is in use,
+     * and if [engine], what it sets in the engine changed too.
+     */
+    fun controllerChanged(c: Controller, engine: Boolean = true) {
+        if (!started) return
+        if (c === controller && engine && !loading) applyEngine(perf)
+        pendingSave += c
+        saver.removeCallbacks(saveControllers)
+        saver.postDelayed(saveControllers, 400)
+        if (c === controller) touched()
+    }
+    private val pendingSave = mutableSetOf<Controller>()
+    private val saveControllers = Runnable {
+        val e = prefs.edit()
+        for (c in pendingSave) e.putString("ctl.${c.id}", c.save().toString())
+        pendingSave.clear()
+        e.apply()
     }
 
-    fun changePadSplit(at: Float) {
-        padSplitAt = at.coerceIn(PAD_SPLIT_MIN, 1 - PAD_SPLIT_MIN)
+    /** Play with another controller: the sound stays; its own settings come back as you left them. */
+    fun switchController(c: Controller) {
+        if (c === controller) return
+        controller.stop()
+        controller = c
+        side = 0
+        prefs.edit().putString("controller", c.id).apply()
+        applyEngine(perf)
         touched()
-        saver.removeCallbacks(savePadSplit)
-        saver.postDelayed(savePadSplit, 400)
     }
-    private val savePadSplit = Runnable { prefs.edit().putFloat("padSplitAt", padSplitAt).apply() }
 
     // ---- the loops ---------------------------------------------------------------------------
 
@@ -234,14 +263,15 @@ object AppState {
     val activePreset get() = userPresets.firstOrNull { it.name == presetName }
     private var loading = false
 
-    private fun currentLayout() = PadLayout(pads, padSplitAt)
+    /** What is playing now, as a preset of yours. */
+    private fun current(name: String) = Preset(name, perf, controller = controller.id, settings = controller.save().toString())
 
     /** Something changed: keep it in your preset on view, or note that a built-in one was changed. */
     private fun touched() {
         if (loading || presetName.isEmpty()) return
         val p = activePreset
         if (p == null) { presetEdited = true; return }
-        val now = p.copy(perf = perf, pad = currentLayout())
+        val now = current(p.name)
         if (now == p) return
         userPresets = userPresets.map { if (it.name == p.name) now else it }
         saver.removeCallbacks(savePresetsNow)
@@ -250,19 +280,19 @@ object AppState {
 
     fun load(p: Preset) {
         loading = true
-        update { p.perf }
-        p.pad?.let { l ->
-            // The layout comes from the preset; how the pad looks and the lock stay as they are.
-            val look = pads[0]
-            pads = listOf(l.pads[0].copy(theme = look.theme, lines = look.lines, locked = look.locked, hideRail = look.hideRail), l.pads[1])
-            prefs.edit().putString("pad", pads[0].json().toString()).putString("pad2", pads[1].json().toString()).apply()
-            padSplitAt = l.splitAt
-            prefs.edit().putFloat("padSplitAt", padSplitAt).apply()
-        }
-        loading = false
+        val c = p.controller?.let { Controllers.byId(it) } ?: controller
+        if (c !== controller) { controller.stop(); controller = c; side = 0; prefs.edit().putString("controller", c.id).apply() }
+        val s = p.settings?.let { runCatching { JSONObject(it) }.getOrNull() }
+        if (s != null) c.loadPreset(s) else c.clearForPreset()
+        val old = perf
+        perf = p.perf
+        applyEngine(old)
+        save()
         presetName = p.name
         presetEdited = false
         prefs.edit().putString("preset", presetName).apply()
+        controllerChanged(c, engine = false)        // saved as the controller's; loading, so not into a preset
+        loading = false
     }
 
     /** A name not yet taken: "Cello", then "Cello 2", "Cello 3"... */
@@ -277,15 +307,15 @@ object AppState {
     }
 
     /** What is playing now, as a name: the instrument, or both of a split or layer. */
-    fun soundName(p: Perf = perf): String {
+    fun soundName(p: Perf = perf, two: Boolean = twoParts): String {
         fun n(i: Int) = instruments.firstOrNull { it.id == p.part(i).instrument }?.name ?: "Preset"
-        return if (p.layout == 0) n(0) else "${n(0)} + ${n(1)}"
+        return if (!two) n(0) else "${n(0)} + ${n(1)}"
     }
 
     /** Keep what is playing now as a new preset of yours (after the one on view), and switch to it. */
     fun newPreset(name: String = soundName()): String {
         val clean = freeName(name)
-        val fresh = Preset(clean, perf, pad = currentLayout())
+        val fresh = current(clean)
         val at = userPresets.indexOfFirst { it.name == presetName }
         userPresets = if (at < 0) userPresets + fresh else userPresets.take(at + 1) + fresh + userPresets.drop(at + 1)
         presetName = clean
@@ -296,7 +326,7 @@ object AppState {
 
     fun saveAs(name: String) {
         val clean = name.trim().ifEmpty { return }
-        val fresh = Preset(clean, perf, pad = currentLayout())
+        val fresh = current(clean)
         userPresets = if (userPresets.any { it.name == clean }) userPresets.map { if (it.name == clean) fresh else it } else userPresets + fresh
         presetName = clean
         presetEdited = false
@@ -311,8 +341,13 @@ object AppState {
         savePresets()
     }
 
+    /** A copy of yours: a built-in one gets the rest of its controller's settings from how they are now. */
     fun duplicate(p: Preset) {
-        val copy = p.copy(name = freeName(p.name), builtIn = false, pad = p.pad ?: currentLayout())
+        val c = p.controller?.let { Controllers.byId(it) } ?: controller
+        val full = c.save()
+        p.settings?.let { s -> val o = JSONObject(s); for (k in o.keys()) full.put(k, o.get(k)) }
+        if (p.settings == null && c === TouchPad) { full.put("split", false); full.put("arp0", Arp().json()); full.put("arp1", Arp().json()) }
+        val copy = p.copy(name = freeName(p.name), builtIn = false, controller = c.id, settings = full.toString())
         val at = userPresets.indexOfFirst { it.name == p.name }
         userPresets = if (at < 0) userPresets + copy else userPresets.take(at + 1) + copy + userPresets.drop(at + 1)
         savePresets()
@@ -335,11 +370,10 @@ object AppState {
     }
 
     /**
-     * Your first presets: a spread of sounds to loop together (and the touch pad's sound slots of
-     * 0.13, which become presets of their own).
+     * Your first presets: a spread of sounds to loop together, on the touch pad (and the touch
+     * pad's sound slots of 0.13, which become presets of their own).
      */
     private fun startPresets() {
-        val layout = currentLayout()
         val fromSlots = runCatching {
             val a = JSONArray(prefs.getString("slots", null) ?: return@runCatching null)
             (0 until a.length()).mapNotNull { k -> a.optJSONObject(k)?.let { Part.from(it) } }
@@ -348,12 +382,13 @@ object AppState {
         val made = mutableListOf<Preset>()
         for (part in parts) {
             val p = Perf(parts = listOf(part, Part(instrument = "voices/soprano")))
-            val base = soundName(p)
+            val base = soundName(p, two = false)
             val taken = (BUILT_IN_PRESETS + userPresets + made).map { it.name }.toSet()
             var name = base; var n = 2
             while (name in taken) name = "$base ${n++}"
             val drums = instruments.firstOrNull { it.id == part.instrument }?.group == "drums"
-            made += Preset(name, p, pad = if (drums) PadLayout(layout.pads.map { it.copy(vertical = 2) }, layout.splitAt) else layout)
+            val pads = TouchPad.pads.map { if (drums) it.copy(vertical = 2) else it }
+            made += Preset(name, p, settings = TouchPad.preset(pads = pads, splitAt = TouchPad.splitAt).toString())
         }
         userPresets = userPresets + made
         prefs.edit().putBoolean("presetsStarted", true).remove("slots").apply()
@@ -373,37 +408,43 @@ object AppState {
     private fun save() { saver.removeCallbacks(saveNow); saver.postDelayed(saveNow, 400) }
 }
 
-private fun preset(name: String, perf: Perf, pad: PadLayout? = null) = Preset(name, perf, builtIn = true, pad = pad)
+/** A built-in preset for any controller: the sound only. */
+private fun preset(name: String, perf: Perf) = Preset(name, perf, builtIn = true, controller = null)
+/** A built-in touch pad preset: the sound, and the pad's split, arps and (if given) pads. */
+private fun padPreset(name: String, perf: Perf, split: Boolean = false, arps: List<Arp> = listOf(Arp(), Arp()),
+                      pads: List<PadSettings>? = null) =
+    Preset(name, perf, builtIn = true, settings = TouchPad.preset(split, arps, pads).toString())
 private fun two(a: Part, b: Part = Part(instrument = "voices/soprano")) = listOf(a, b)
+private fun arp(order: Int, rate: Float, gate: Float, octaves: Int = 1, latch: Boolean = false) =
+    Arp(on = true, order = order, rate = rate, gate = gate, octaves = octaves, latch = latch)
 
 /** A starting point for each kind of playing. */
 val BUILT_IN_PRESETS = listOf(
     // Snapped keys, no finger vibrato (a piano cannot bend); press firmly as you lift to hold a note.
-    preset("Grand piano", Perf(reverbSize = 0.65f, parts = two(Part("keys/piano", reverb = 0.22f))),
-           PadLayout(listOf(PadSettings(size = 12, glide = 0f, vibrato = 0), PadSettings()), 0.5f)),
+    padPreset("Grand piano", Perf(reverbSize = 0.65f, parts = two(Part("keys/piano", reverb = 0.22f))),
+              pads = listOf(PadSettings(size = 12, glide = 0f, vibrato = 0), PadSettings())),
     preset("Solo cello", Perf(parts = two(Part("strings/cello", reverb = 0.25f)), reverbSize = 0.6f)),
     preset("Solo violin", Perf(parts = two(Part("strings/violin", reverb = 0.25f)))),
     preset("Breathy flute", Perf(parts = two(Part("winds/flute", reverb = 0.35f, pressureCurve = 0.7f)), reverbSize = 0.75f)),
-    preset("Choir layer", Perf(layout = 2, parts = listOf(
+    preset("Choir layer", Perf(layered = true, parts = listOf(
         Part("strings/cello", reverb = 0.3f, volume = 0.8f),
         Part("voices/soprano", transpose = 12, reverb = 0.45f, volume = 0.6f)), reverbSize = 0.8f)),
-    preset("Bass + lead split", Perf(layout = 1, splitNote = 60, parts = listOf(
+    padPreset("Bass + lead split", Perf(parts = listOf(
         Part("voices/bass", transpose = -12, reverb = 0.1f),
-        Part("synths/lead", reverb = 0.2f, delay = 0.25f)))),
-    preset("Arp left, cello right", Perf(layout = 1, splitNote = 60, bpm = 100f, parts = listOf(
-        Part("struck/marimba", arp = true, order = 2, rate = 4f, gate = 0.5f, octaves = 2, latch = true, reverb = 0.2f, delay = 0.2f),
-        Part("strings/cello", reverb = 0.3f)))),
-    preset("Pluck arp", Perf(bpm = 118f, delayBeats = 0.75f, delayFeedback = 0.4f, parts = two(
-        Part("plucked/steel-guitar", arp = true, order = 0, rate = 4f, gate = 0.4f, octaves = 2, reverb = 0.2f, delay = 0.35f)))),
+        Part("synths/lead", reverb = 0.2f, delay = 0.25f))), split = true),
+    padPreset("Arp left, cello right", Perf(bpm = 100f, parts = listOf(
+        Part("struck/marimba", reverb = 0.2f, delay = 0.2f),
+        Part("strings/cello", reverb = 0.3f))), split = true,
+        arps = listOf(arp(order = 2, rate = 4f, gate = 0.5f, octaves = 2, latch = true), Arp())),
+    padPreset("Pluck arp", Perf(bpm = 118f, delayBeats = 0.75f, delayFeedback = 0.4f, parts = two(
+        Part("plucked/steel-guitar", reverb = 0.2f, delay = 0.35f))),
+        arps = listOf(arp(order = 0, rate = 4f, gate = 0.4f, octaves = 2), Arp())),
     preset("Dreamy pad", Perf(reverbSize = 0.95f, parts = two(
         Part("synths/pad", brightness = 0.7f, reverb = 0.6f, delay = 0.15f, pressureCurve = 0.8f)))),
     preset("Gritty lead", Perf(bpm = 124f, parts = two(Part("synths/lead", drive = 0.5f, brightness = 0.85f, reverb = 0.15f, delay = 0.3f)))),
-    preset("Vibraphone, latched", Perf(bpm = 90f, parts = two(
-        Part("struck/vibraphone", arp = true, order = 3, rate = 3f, gate = 0.8f, latch = true, reverb = 0.4f)))),
+    padPreset("Vibraphone, latched", Perf(bpm = 90f, parts = two(Part("struck/vibraphone", reverb = 0.4f))),
+              arps = listOf(arp(order = 3, rate = 3f, gate = 0.8f, latch = true), Arp())),
 )
-
-/** The narrowest a pad of a split can be, as a fraction of the screen. */
-const val PAD_SPLIT_MIN = 0.2f
 
 /** Your first presets: a spread of sounds to loop together. */
 val STARTING_SOUNDS = listOf(
