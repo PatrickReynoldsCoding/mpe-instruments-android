@@ -17,7 +17,7 @@ name="odo-desktop-$version-linux-x86_64"
 stage="$root/desktop/dist/$name"
 rm -rf "$stage" "$stage.tar.gz"
 mkdir -p "$stage/library"
-cp "$build/odo" "$stage/"
+cp "$build/odo" "$root/desktop/odo.svg" "$root/desktop/install.sh" "$stage/"
 strip "$stage/odo"
 cp "$root"/third_party/mpe-instruments/build/packages/*.odoi "$stage/library/"
 for c in $controllers; do
@@ -27,7 +27,7 @@ cat > "$stage/README.txt" <<TXT
 odo $version for computers: a MESH (Multimodal Expression Sensor Host).
 Play the instruments in library/ with the controllers in library/, on a touch screen.
 
-Run:      ./odo
+Run:      ./odo, or ./install.sh to put odo in your app menu (in ~/.local/opt/odo)
 Needs:    Linux x86-64 with SDL 3 and Faust's libfaust (Ubuntu 26.04: sudo apt install libsdl3-0 libfaust2t64)
 Updates:  odo checks GitHub for a newer version when it opens; tap the update line at the
           bottom of the rail to install it. ./odo --no-update turns the check off.

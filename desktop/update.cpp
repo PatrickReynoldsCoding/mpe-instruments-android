@@ -155,7 +155,7 @@ void Updater::doInstall() {
     if (ec) { fs::rename(old + "/odo", dir_ + "/odo", ec); return fail("Could not replace odo"); }
     fs::rename(dir_ + "/library", old + "/library", ec);
     fs::rename(fresh + "/library", dir_ + "/library", ec);
-    for (const char* extra : {"README.txt"}) {
+    for (const char* extra : {"README.txt", "odo.svg", "install.sh"}) {
         fs::remove(dir_ + "/" + extra, ec);
         fs::rename(fresh + "/" + extra, dir_ + "/" + extra, ec);
     }

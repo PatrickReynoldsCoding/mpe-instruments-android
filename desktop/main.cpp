@@ -579,6 +579,8 @@ int main(int argc, char** argv) {
         dirs.push_back(home() + "/.local/share/odo/library");
     }
 
+    // "odo": the window's app id, so the desktop matches it to odo.desktop (its icon in the dock).
+    SDL_SetAppMetadata("odo", ODO_DESKTOP_VERSION, "odo");
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");   // a touch is a finger, not also a mouse
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) { std::fprintf(stderr, "odo: %s\n", SDL_GetError()); return 1; }
