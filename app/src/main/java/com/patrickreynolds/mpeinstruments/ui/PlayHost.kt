@@ -250,7 +250,7 @@ private fun SettingPanel(o: Option, part: Int, t: PadTheme, close: () -> Unit) {
  * hysteresis, so it does not flicker at 45 degrees.
  */
 @Composable
-private fun rememberPhoneTurn(): Float {
+internal fun rememberPhoneTurn(): Float {
     val context = androidx.compose.ui.platform.LocalContext.current
     var turn by remember { mutableStateOf(0f) }
     androidx.compose.runtime.DisposableEffect(Unit) {

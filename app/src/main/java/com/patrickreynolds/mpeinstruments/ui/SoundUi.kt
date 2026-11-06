@@ -38,7 +38,7 @@ import kotlin.math.roundToInt
 
 /** Play or arpeggiate, and the arp's settings: the touch pad's, for one pad. */
 @Composable
-fun ArpControls(p: Arp, c: Color, change: ((Arp) -> Arp) -> Unit) {
+fun ArpControls(p: Arp, c: Color, latch: Boolean = true, change: ((Arp) -> Arp) -> Unit) {
     Segmented(listOf("Play", "Arpeggiate"), if (p.on) 1 else 0, accent = c) { i -> change { it.copy(on = i == 1) } }
     if (p.on) {
         Spacer(Modifier.height(12.dp))
@@ -51,7 +51,7 @@ fun ArpControls(p: Arp, c: Color, change: ((Arp) -> Arp) -> Unit) {
         LabeledSlider("Gate", p.gate, 0.05f..1f, pct(p.gate), accent = c) { v -> change { it.copy(gate = v) } }
         Text("Octaves", color = TextDim, fontSize = 13.sp)
         Segmented(listOf("1", "2", "3", "4"), p.octaves - 1, accent = c) { i -> change { it.copy(octaves = i + 1) } }
-        SwitchRow("Latch", p.latch, "Keep playing after you lift your hand; a new chord replaces it", accent = c) { v ->
+        if (latch) SwitchRow("Latch", p.latch, "Keep playing after you lift your hand; a new chord replaces it", accent = c) { v ->
             change { it.copy(latch = v) }
         }
         Text("Each arp note follows the finger that holds it: press to swell, slide to change the tone, wiggle for vibrato.",

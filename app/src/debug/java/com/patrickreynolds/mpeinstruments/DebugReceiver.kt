@@ -61,6 +61,10 @@ class DebugReceiver : BroadcastReceiver() {
                 if (intent.hasExtra("transpose")) ExternalMidi.update { it.copy(transpose = intent.getIntExtra("transpose", 0)) }
                 if (intent.hasExtra("volume")) AppState.changeVolume(intent.getFloatExtra("volume", 0.8f))
                 if (intent.hasExtra("bend")) ExternalMidi.update { it.copy(bendRange = intent.getFloatExtra("bend", 48f)) }
+                // --es grid '<KeyGrid settings json>' sets the grid's settings.
+                intent.getStringExtra("grid")?.let { j ->
+                    com.patrickreynolds.mpeinstruments.controllers.KeyGrid.load(org.json.JSONObject(j))
+                    AppState.controllerChanged(com.patrickreynolds.mpeinstruments.controllers.KeyGrid, true) }
                 intent.getStringExtra("pad")?.let { j ->
                     TouchPad.loadPreset(org.json.JSONObject(j)); AppState.controllerChanged(TouchPad) }
                 if (intent.hasExtra("eink")) AppState.changeEink(intent.getBooleanExtra("eink", false))

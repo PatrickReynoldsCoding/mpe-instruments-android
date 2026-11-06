@@ -1,7 +1,21 @@
 package com.patrickreynolds.mpeinstruments.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -12,11 +26,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -29,6 +48,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.patrickreynolds.mpeinstruments.ARP_ORDERS
@@ -52,12 +72,15 @@ fun keyGridOptions(): List<Option> {
     val accent = if (Eink) Color.Black else gridTheme(s).light
     fun set(change: (KeyGrid.Settings) -> KeyGrid.Settings) = KeyGrid.update(change)
     return listOf(
-        Option("Grid", "${s.cols} × ${s.rows}", perPart = false) {
+        Option("Grid", "${s.cols} × ${if (s.fillRows) "fill" else s.rows}", perPart = false) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("Squares across", color = TextDim, fontSize = 13.sp)
                 Chips(KeyGrid.COLS.map { "$it" }, s.cols - KeyGrid.COLS.first, accent) { k -> set { it.copy(cols = KeyGrid.COLS.first + k) } }
                 Text("Rows up", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                Chips(KeyGrid.ROWS.map { "$it" }, s.rows - KeyGrid.ROWS.first, accent) { k -> set { it.copy(rows = KeyGrid.ROWS.first + k) } }
+                Chips(listOf("Fill") + KeyGrid.ROWS.map { "$it" }, if (s.fillRows) 0 else s.rows - KeyGrid.ROWS.first + 1, accent) { k ->
+                    set { if (k == 0) it.copy(fillRows = true) else it.copy(fillRows = false, rows = KeyGrid.ROWS.first + k - 1) } }
+                if (s.fillRows) Text("Fill: as many rows as fit up to the top of the screen, at the square size below.",
+                                     color = TextDim, fontSize = 12.sp)
                 LabeledSlider("Square size", s.squareSize, KeyGrid.SIZES, "${(s.squareSize * 100).roundToInt()}%", accent = accent) { v ->
                     set { it.copy(squareSize = v.coerceIn(KeyGrid.SIZES)) } }
                 LabeledSlider("Spacing", s.spacing, KeyGrid.SPACINGS, "${(s.spacing * 100).roundToInt()}%", accent = accent) { v ->
@@ -66,7 +89,7 @@ fun keyGridOptions(): List<Option> {
                      color = TextDim, fontSize = 12.sp)
                 Text("Hand", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                 Segmented(listOf("Right-handed", "Left-handed"), if (s.leftHanded) 1 else 0, accent) { k -> set { it.copy(leftHanded = k == 1) } }
-                Text("The notes climb row by row from the bottom " + (if (s.leftHanded) "right, right to left" else "left, left to right") +
+                Text("The notes climb row by row from the bottom " + (if (s.leftHanded) "left, left to right" else "right, right to left") +
                      ": three fingers on a row of three play three neighbouring notes, and the next row carries on.",
                      color = TextDim, fontSize = 12.sp)
             }
@@ -103,14 +126,46 @@ fun keyGridOptions(): List<Option> {
             Text("Wiggle a held square quickly from side to side. A slow move is left to Across and Up/down.",
                  color = TextDim, fontSize = 12.sp)
         },
+        Option("Latch", if (s.latch) (if (s.latchMode == KeyGrid.LATCH_TAP) "Tap" else "On") else "Off", perPart = false) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                SwitchRow("Latch", s.latch, "Lift your fingers and the notes keep sounding, arp or not. Turning it off lets them go.",
+                          accent = accent) { v -> set { it.copy(latch = v) } }
+                Text("What the next touch does", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                Segmented(KeyGrid.LATCH_MODES, s.latchMode, accent) { k -> set { it.copy(latchMode = k) } }
+                Text(if (s.latchMode == KeyGrid.LATCH_TAP)
+                         "Tap a square to hold it; tap it again to let it go. Build a chord a note at a time."
+                     else "Fingers that go down together make a chord; once they have all lifted, the next touch lets that chord go " +
+                          "and starts a new one. Add fingers while some are still down to add notes.",
+                     color = TextDim, fontSize = 12.sp)
+                Text("A held square keeps a bright edge and a dot in its corner. Hold (beside the grid) is the same while you press it, like a sustain pedal.",
+                     color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+        },
         Option("Arp", if (s.arp.on) ARP_ORDERS[s.arp.order] else "Off", perPart = false) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                ArpControls(s.arp, accent) { c -> set { it.copy(arp = c(it.arp)) } }
+                ArpControls(s.arp, accent, latch = false) { c -> set { it.copy(arp = c(it.arp)) } }
+                if (s.arp.on) Text("To keep it going after you lift your hand, turn on Latch.", color = TextDim, fontSize = 12.sp)
                 TempoControls(accent)
+            }
+        },
+        Option("Sides", KeyGrid.SIDE_CONTROLS.indices.count { s.side(it) != KeyGrid.OFF }.let { if (it == 0) "Off" else "$it" },
+               perPart = false) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Controls in the room either side of the grid. Each takes a strip; the grid fits what is left.",
+                     color = TextDim, fontSize = 12.sp)
+                for ((i, name) in KeyGrid.SIDE_CONTROLS.withIndex()) {
+                    Text("$name · ${SIDE_HELP[i]}", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                    Segmented(listOf("Off", "Left", "Right"), s.side(i), accent) { k ->
+                        set { st -> st.copy(sides = KeyGrid.SIDE_CONTROLS.indices.map { if (it == i) k else st.side(it) }) } }
+                }
             }
         },
     )
 }
+
+private val SIDE_HELP = listOf(
+    "tap to latch, tap again to let go", "press and hold to sustain", "tap to arpeggiate",
+    "slide for the octave", "slide to bend every note, springs back", "slide to brighten or darken every note")
 
 @Composable
 private fun AxisHelp() = Text(
@@ -150,9 +205,24 @@ fun KeyGridSurface() {
             if (!Eink || grid.takeDirty()) frame++
         }
     }
-    grid.settings = KeyGrid.settings
-    grid.center = (AppState.instrument(0)?.centerNote ?: 60f) + 12f * KeyGrid.settings.octave
-    Canvas(Modifier.fillMaxSize().clipToBounds().systemGestureExclusion()
+    val s = KeyGrid.settings
+    grid.settings = s
+    grid.center = (AppState.instrument(0)?.centerNote ?: 60f) + 12f * s.octave
+    LaunchedEffect(s.latch) { if (!s.latch) grid.releaseLatched() }
+    val th = gridTheme(s)
+    val left = KeyGrid.SIDE_CONTROLS.indices.filter { s.side(it) == KeyGrid.LEFT }
+    val right = KeyGrid.SIDE_CONTROLS.indices.filter { s.side(it) == KeyGrid.RIGHT }
+    val turn = rememberPhoneTurn()
+    Row(Modifier.fillMaxSize().background(if (Eink) Color.White else th.background)) {
+        if (left.isNotEmpty()) SideStrip(left, grid, th, turn)
+        GridCanvas(grid, Modifier.weight(1f).fillMaxHeight()) { frame }
+        if (right.isNotEmpty()) SideStrip(right, grid, th, turn)
+    }
+}
+
+@Composable
+private fun GridCanvas(grid: Grid, modifier: Modifier, frame: () -> Int) {
+    Canvas(modifier.clipToBounds().systemGestureExclusion()
         .pointerInput(Unit) {
             awaitPointerEventScope {
                 while (true) {
@@ -169,7 +239,7 @@ fun KeyGridSurface() {
                 }
             }
         }) {
-        frame.let { }
+        frame()
         grid.size(size.width, size.height, density)
         grid.draw(this)
     }
@@ -187,8 +257,13 @@ private class Grid {
     fun size(width: Float, height: Float, d: Float) { w = width; h = height; density = d }
     private val pad get() = 10f * density
     /** A square's side with its gap, and the grid's bottom left corner. */
-    private val cell get() = minOf((w - 2 * pad) / settings.cols, (h - 2 * pad) / settings.rows) *
-        settings.squareSize.coerceIn(KeyGrid.SIZES)
+    private val size get() = settings.squareSize.coerceIn(KeyGrid.SIZES)
+    /** The height the grid may use: from the bottom up to below the loop buttons and sound chips. */
+    private val room get() = h - pad - 140f * density
+    /** The rows: as set, or with Fill as many as fit at the width's square size. */
+    val rows get() = if (!settings.fillRows) settings.rows
+        else floor(room / ((w - 2 * pad) / settings.cols * size)).toInt().coerceIn(1, KeyGrid.FILL_MAX)
+    private val cell get() = minOf((w - 2 * pad) / settings.cols, room / rows) * size
     private val gap get() = cell * settings.spacing.coerceIn(KeyGrid.SPACINGS)
     private val left get() = (w - cell * settings.cols) / 2
     private val bottom get() = h - pad
@@ -196,7 +271,7 @@ private class Grid {
     private val mask get() = SCALES[settings.scale].mask.let { if (it == 0) 0xFFF else it }
     private fun inScale(note: Int) = (mask shr (((note - settings.key) % 12 + 12) % 12)) and 1 == 1
     private val degrees get() = (0 until 12).filter { (mask shr it) and 1 == 1 }
-    private val count get() = settings.rows * settings.cols
+    private val count get() = rows * settings.cols
 
     /** The note of square n. The grid starts on the key, so its middle sits near the middle of the instrument. */
     private fun noteOf(n: Int): Int {
@@ -207,13 +282,14 @@ private class Grid {
         return (if (settings.chromatic) base + k else base + 12 * (k / step) + degrees[k % step]).coerceIn(0, 127)
     }
 
-    /** The column a square of the row is drawn in: mirrored for the left hand. */
-    private fun column(c: Int) = if (settings.leftHanded) settings.cols - 1 - c else c
+    /** The column a square of the row is drawn in: right-handed the notes climb right to left. */
+    private val mirrored get() = !settings.leftHanded
+    private fun column(c: Int) = if (mirrored) settings.cols - 1 - c else c
 
     private fun squareAt(x: Float, y: Float): Int? {
         val c = column(floor((x - left) / cell).toInt().coerceIn(-1, settings.cols))
         val r = floor((bottom - y) / cell).toInt()
-        if (c !in 0 until settings.cols || r !in 0 until settings.rows) return null
+        if (c !in 0 until settings.cols || r !in 0 until rows) return null
         return r * settings.cols + c
     }
     private fun squareOrigin(n: Int) = Offset(left + column(n % settings.cols) * cell, bottom - (n / settings.cols + 1) * cell)
@@ -222,6 +298,7 @@ private class Grid {
         var x = x0; var y = y0
         var sx = x0; var sy = y0            // the finger's slow position: the axes follow it, vibrato is what is left
         var pressure = -1; var slide = -1; var bend = -1; var volume = -1
+        var t = 0f; var peak = 1e-4f; var light = 1f   // once latched: how long, how loud it was, how lit it is now
     }
 
     /**
@@ -233,6 +310,16 @@ private class Grid {
     }
 
     private val fingers = HashMap<Long, Finger>()
+    /** Notes left sounding after their fingers lifted (latch, or hold), by channel, oldest first. */
+    private val latched = LinkedHashMap<Int, Finger>()
+    /** Fingers that came down to let a latched square go: they play nothing until they lift. */
+    private val spent = HashSet<Long>()
+    var latchedCount by mutableIntStateOf(0)
+        private set
+    private var holding = false
+    /** From the side strips: a bend for every note (semitones), and a tone offset. */
+    var sideBend = 0f
+    var sideTone by mutableFloatStateOf(0f)
     private val ringing = mutableListOf<Ringing>()
     private val lastUsed = LongArray(16)
     private var clock = 0L
@@ -242,12 +329,25 @@ private class Grid {
 
     /** A channel no finger holds, the one silent longest, so a note still ringing on another is not cut off. */
     private fun freeChannel(): Int? {
-        val used = fingers.values.map { it.channel }.toSet()
-        return (1..15).filter { it !in used }.minByOrNull { lastUsed[it] }
+        val used = fingers.values.map { it.channel }.toSet() + latched.keys
+        (1..15).filter { it !in used }.minByOrNull { lastUsed[it] }?.let { return it }
+        // Every channel busy: the oldest latched note makes way.
+        val oldest = latched.keys.firstOrNull() ?: return null
+        letGo(latched.remove(oldest)!!); latchedCount = latched.size
+        return oldest
     }
+
+    private val latching get() = settings.latch || holding
 
     fun down(id: Long, x: Float, y: Float) {
         val n = squareAt(x, y) ?: return
+        if (settings.latch && settings.latchMode == KeyGrid.LATCH_TAP) {
+            // Tap a held square to let it go.
+            val held = latched.values.firstOrNull { it.n == n }
+            if (held != null) { latched.remove(held.channel); letGo(held); latchedCount = latched.size; spent += id; dirty = true; return }
+        } else if (settings.latch && fingers.isEmpty()) releaseLatched()    // a new hand: the last chord goes
+        // The same note held over (hold, or a chord being added to) is played again, not doubled.
+        latched.values.firstOrNull { it.n == n }?.let { latched.remove(it.channel); letGo(it); latchedCount = latched.size }
         val ch = freeChannel() ?: return
         lastUsed[ch] = ++clock
         ringing.removeAll { it.channel == ch }
@@ -269,7 +369,20 @@ private class Grid {
     }
 
     fun up(id: Long) {
+        if (spent.remove(id)) return
         val f = fingers.remove(id) ?: return
+        if (latching) {
+            // It stays as it is now (no vibrato left in it), until the latch or hold lets it go.
+            f.sx = f.x; f.sy = f.y
+            sendExpression(f)
+            f.peak = levelOf(f.channel, f.note).coerceAtLeast(1e-4f); f.t = 0f
+            latched[f.channel] = f; latchedCount = latched.size
+        } else letGo(f)
+        dirty = true
+    }
+
+    /** Note-off, and the square's afterglow follows the sound as it dies. */
+    private fun letGo(f: Finger) {
         send(0x80 or f.channel, f.note, 64)
         lastUsed[f.channel] = ++clock
         val p = AppState.perf
@@ -278,7 +391,18 @@ private class Grid {
         dirty = true
     }
 
-    fun releaseAll() { for (id in fingers.keys.toList()) up(id) }
+    fun releaseLatched() {
+        for (f in latched.values.toList()) letGo(f)
+        latched.clear(); latchedCount = 0
+    }
+
+    /** The Hold strip: while pressed, lifted fingers leave their notes; let go and they go (unless latched). */
+    fun hold(on: Boolean) {
+        holding = on
+        if (!on && !settings.latch) releaseLatched()
+    }
+
+    fun releaseAll() { for (id in fingers.keys.toList()) up(id); spent.clear(); holding = false; releaseLatched() }
 
     // ---- what the engine is playing ------------------------------------------------------------
     private val voices = FloatArray(32 * 8)
@@ -307,6 +431,13 @@ private class Grid {
             f.sx += (f.x - f.sx) * k; f.sy += (f.y - f.sy) * k
             sendExpression(f)
         }
+        for (f in latched.values) {
+            sendExpression(f)
+            f.t += dt
+            val level = levelOf(f.channel, f.note)
+            if (f.t < 0.05f) f.peak = maxOf(f.peak, level)
+            f.light = light(level / f.peak)
+        }
         for (r in ringing) {
             r.t += dt
             val level = levelOf(r.channel, r.note)
@@ -317,7 +448,7 @@ private class Grid {
             r.glow = maxOf(r.voice, tail)
         }
         ringing.removeAll { it.glow <= 0.004f && it.t > 0.05f }
-        if (fingers.isNotEmpty() || ringing.isNotEmpty()) dirty = true
+        if (fingers.isNotEmpty() || ringing.isNotEmpty() || latched.isNotEmpty()) dirty = true
     }
 
     private class Expr(val pressure: Int, val slide: Int, val bend: Int, val volume: Int)
@@ -334,8 +465,8 @@ private class Grid {
                 KeyGrid.TONE -> slide = (0.5f + 0.5f * v).coerceIn(0f, 1f)
                 // Toward the note you drag to: across, the next square or the one before; up and down, the row above or below.
                 KeyGrid.BEND -> {
-                    // Left-handed the next note is to the left: dragging right goes down the scale.
-                    val step = if (!across) settings.cols else if (settings.leftHanded) -1 else 1
+                    // Right-handed the next note is to the left: dragging right goes down the scale.
+                    val step = if (!across) settings.cols else if (mirrored) -1 else 1
                     val to = noteOf(f.n + if (v >= 0) step else -step)
                     val amount = ((abs(v) - 0.08f) / 0.92f).coerceIn(0f, 1f)
                     semis += (to - f.note) * amount
@@ -345,6 +476,8 @@ private class Grid {
         }
         apply(settings.xTarget, dx, true)
         apply(settings.yTarget, dy, false)
+        semis += sideBend
+        slide = (slide + sideTone).coerceIn(0f, 1f)
         val depth = PadSettings.VIBRATO_DEPTH.getOrElse(settings.vibrato) { 0f }
         if (depth > 0f) semis += ((f.x - f.sx) / density * 0.08f * depth / 0.5f).coerceIn(-depth, depth)
         val bend = (8192 + semis / 48f * 8192).roundToInt().coerceIn(0, 16383)
@@ -369,6 +502,8 @@ private class Grid {
         val held = fingers.values.map { it.n }.toSet()
         val glowOf = FloatArray(count)
         for (r in ringing) if (r.n < count) glowOf[r.n] = maxOf(glowOf[r.n], r.glow)
+        val kept = HashSet<Int>()
+        for (f in latched.values) if (f.n < count) { kept += f.n; glowOf[f.n] = maxOf(glowOf[f.n], f.light) }
         val radius = CornerRadius(cell * 0.08f)
         val side = cell - gap
         val dash = PathEffect.dashPathEffect(floatArrayOf(6f * density, 5f * density))
@@ -389,8 +524,9 @@ private class Grid {
                 drawRoundRect(light.copy(alpha = (if (flat) 1f else 0.92f) * glow), o, sz, radius)
             }
             // The outline: the root's fully lit, the scale's soft, a note outside the scale broken.
+            val latchedHere = n in kept
             val edge = when {
-                on || glow > 0.6f -> if (flat) Color.Black else th.hot
+                on || glow > 0.6f || latchedHere -> if (flat) Color.Black else th.hot
                 root -> light
                 off -> light.copy(alpha = if (flat) 0.4f else 0.18f)
                 else -> light.copy(alpha = if (flat) 0.8f else 0.38f)
@@ -400,6 +536,9 @@ private class Grid {
                                                                   style = Stroke(width = 6f * density))
             drawRoundRect(edge, o, sz, radius, style = Stroke(width = (if (root) 2.5f else 1.5f) * density,
                                                               pathEffect = if (off && glow == 0f) dash else null))
+            // A latched square: a dot in its corner, as long as it is held.
+            if (latchedHere && !on) drawCircle(if (glow > 0.5f) (if (flat) Color.White else th.onLight) else (if (flat) Color.Black else th.hot),
+                                               side * 0.06f, o + Offset(side * 0.84f, side * 0.16f))
             if (settings.labels) {
                 text.textSize = side * 0.16f
                 text.isFakeBoldText = root
@@ -413,6 +552,131 @@ private class Grid {
             val r = cell * 0.9f
             drawCircle(Brush.radialGradient(listOf(th.hot.copy(alpha = 0.5f), light.copy(alpha = 0.22f), light.copy(alpha = 0f)),
                                             center = Offset(f.x, f.y), radius = r), r, Offset(f.x, f.y))
+        }
+    }
+}
+
+
+// ---- the side strips --------------------------------------------------------------------------
+
+/** A strip of controls beside the grid, from the bottom up, where the thumb reaches. */
+@Composable
+private fun SideStrip(controls: List<Int>, grid: Grid, th: GridTheme, turn: Float) {
+    val s = KeyGrid.settings
+    val ink = if (Eink) Color.Black else th.light
+    Column(Modifier.width(64.dp).fillMaxHeight().padding(start = 6.dp, end = 6.dp, top = 150.dp, bottom = 10.dp)
+               .systemGestureExclusion(),
+           verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom)) {
+        for (c in controls) when (c) {
+            KeyGrid.S_LATCH -> SideButton("Latch", if (!s.latch) "off" else if (grid.latchedCount > 0) "${grid.latchedCount} held" else "on",
+                                          s.latch, th, ink, turn, onTap = { KeyGrid.update { it.copy(latch = !it.latch) } })
+            KeyGrid.S_HOLD -> {
+                var down by remember { mutableStateOf(false) }
+                SideButton("Hold", if (down) "holding" else "press", down, th, ink, turn,
+                           onPress = { v -> down = v; grid.hold(v) })
+            }
+            KeyGrid.S_ARP -> SideButton("Arp", if (s.arp.on) ARP_ORDERS[s.arp.order] else "off", s.arp.on, th, ink, turn,
+                                        onTap = { KeyGrid.update { it.copy(arp = it.arp.copy(on = !it.arp.on)) } })
+            KeyGrid.S_OCTAVE -> SideSlider("Oct", if (s.octave == 0) "0" else "%+d".format(s.octave),
+                                           (s.octave + 3) / 6f, th, ink, turn, ticks = 7, centre = false,
+                                           drag = { _, at -> val o = (at * 6).roundToInt() - 3
+                                                             if (o != KeyGrid.settings.octave) KeyGrid.update { it.copy(octave = o) } })
+            KeyGrid.S_BEND -> {
+                var shown by remember { mutableFloatStateOf(0f) }
+                SideSlider("Bend", if (shown == 0f) "0" else "%+.1f".format(shown), 0.5f + shown / 4f, th, ink, turn, ticks = 5, centre = true,
+                           drag = { from, at -> shown = ((at - from) * 4f).coerceIn(-2f, 2f); grid.sideBend = shown },
+                           lift = { shown = 0f; grid.sideBend = 0f })
+            }
+            KeyGrid.S_TONE -> SideSlider("Tone", "%+d".format((grid.sideTone * 200).roundToInt()), 0.5f + grid.sideTone, th, ink, turn,
+                                         ticks = 3, centre = true, drag = { _, at -> grid.sideTone = (at - 0.5f).coerceIn(-0.5f, 0.5f) })
+        }
+    }
+}
+
+/** A square button: a tap ([onTap]) or held down ([onPress] with true, then false). */
+@Composable
+private fun SideButton(label: String, value: String, on: Boolean, th: GridTheme, ink: Color, turn: Float,
+                       onTap: (() -> Unit)? = null, onPress: ((Boolean) -> Unit)? = null) {
+    val shape = RoundedCornerShape(10.dp)
+    // Kept current without restarting the gesture: a restart mid-press would never see the lift.
+    val tap by rememberUpdatedState(onTap)
+    val press by rememberUpdatedState(onPress)
+    Box(Modifier.fillMaxWidth().height(52.dp)
+            .background(if (on) ink.copy(alpha = if (Eink) 1f else 0.85f) else if (Eink) Color.White else th.square, shape)
+            .border(1.5.dp, if (on) (if (Eink) Color.Black else th.hot) else ink.copy(alpha = 0.5f), shape)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown().consume()
+                    press?.invoke(true)
+                    while (true) {
+                        val e = awaitPointerEvent()
+                        e.changes.forEach { it.consume() }
+                        if (e.changes.none { it.pressed }) break
+                    }
+                    press?.invoke(false)
+                    tap?.invoke()
+                }
+            },
+        contentAlignment = Alignment.Center) {
+        val text = if (on) (if (Eink) Color.White else th.onLight) else ink
+        Column(Modifier.rotate(turn), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(label, color = text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(value, color = text.copy(alpha = 0.75f), fontSize = 10.sp, maxLines = 1)
+        }
+    }
+}
+
+/**
+ * A tall slider: [at] runs 0 at the bottom to 1 at the top. [drag] has where the finger came down
+ * and where it is now; [lift] when it lets go.
+ */
+@Composable
+private fun ColumnScope.SideSlider(label: String, value: String, at: Float, th: GridTheme, ink: Color, turn: Float, ticks: Int,
+                                   centre: Boolean, drag: (Float, Float) -> Unit, lift: () -> Unit = {}) {
+    var touched by remember { mutableStateOf(false) }
+    val onDrag by rememberUpdatedState(drag)
+    val onLift by rememberUpdatedState(lift)
+    // No taller than a thumb's reach, and clear of the loop buttons at the top.
+    Box(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 300.dp)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val d = awaitFirstDown(); d.consume()
+                    fun frac(y: Float) = (1f - y / size.height).coerceIn(0f, 1f)
+                    val from = frac(d.position.y)
+                    touched = true
+                    onDrag(from, from)
+                    while (true) {
+                        val e = awaitPointerEvent()
+                        val c = e.changes.firstOrNull { it.id == d.id } ?: break
+                        c.consume()
+                        if (!c.pressed) break
+                        onDrag(from, frac(c.position.y))
+                    }
+                    touched = false
+                    onLift()
+                }
+            }) {
+        Canvas(Modifier.fillMaxSize()) {
+            val r = CornerRadius(10.dp.toPx())
+            drawRoundRect(if (Eink) Color.White else th.square, cornerRadius = r)
+            drawRoundRect(ink.copy(alpha = if (touched) 0.9f else 0.5f), cornerRadius = r, style = Stroke(1.5.dp.toPx()))
+            val top = 46.dp.toPx(); val bottom = size.height - 12.dp.toPx()
+            fun yOf(f: Float) = bottom - (bottom - top) * f
+            for (i in 0 until ticks) {
+                val y = yOf(i / (ticks - 1f))
+                drawLine(ink.copy(alpha = 0.3f), Offset(size.width * 0.3f, y), Offset(size.width * 0.7f, y), 1.dp.toPx())
+            }
+            val y = yOf(at.coerceIn(0f, 1f))
+            val mid = yOf(0.5f)
+            val x = size.width / 2
+            if (centre) drawLine(ink.copy(alpha = 0.6f), Offset(x, mid), Offset(x, y), 4.dp.toPx())
+            else drawLine(ink.copy(alpha = 0.6f), Offset(x, bottom), Offset(x, y), 4.dp.toPx())
+            drawRoundRect(if (Eink) Color.Black else th.hot, Offset(size.width * 0.18f, y - 5.dp.toPx()),
+                          Size(size.width * 0.64f, 10.dp.toPx()), CornerRadius(5.dp.toPx()))
+        }
+        Column(Modifier.align(Alignment.TopCenter).padding(top = 4.dp).rotate(turn), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(label, color = ink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(value, color = ink.copy(alpha = 0.75f), fontSize = 10.sp, maxLines = 1)
         }
     }
 }
