@@ -242,14 +242,23 @@ static int nfingers(void) { int c = 0; for (int k = 0; k < MAX_FINGERS; k++) c +
 typedef struct { float pitch, pressure, slide, volume; } Expr;
 
 /* The axes, from how far the finger has moved (slowly) from where it came down; vibrato from the
-   rest. A whole square's move is the full change. */
+   rest. Loudness, tone and volume reach their full change half a square away (the squares are big:
+   a whole one was too far to hear much); bend aims at the neighbouring note, a whole square away. */
+#define REACH 0.5f
 static void apply(Expr* e, int target, float d, int across, const Finger* f, float* semis) {
-    float v = clampf(d, -1, 1);
+    float v = clampf(d, -1, 1), w = clampf(d / REACH, -1, 1);
     switch (target) {
-    case T_LOUDNESS: e->pressure = clampf(0.75f + 0.5f * v, 0.02f, 1); break;
-    case T_TONE: e->slide = clampf(0.5f + 0.5f * v, 0, 1); break;
+    case T_LOUDNESS: {
+        /* From 0.6: up to full, down to nearly nothing. The volume follows it too, so it works on
+           struck and plucked instruments, which hardly listen to pressure once the note has started. */
+        float level = clampf(0.6f + (w >= 0 ? 0.4f : 0.58f) * w, 0.02f, 1);
+        e->pressure = level;
+        e->volume = clampf(0.4f + level, 0, 1);
+        break;
+    }
+    case T_TONE: e->slide = clampf(0.5f + 0.5f * w, 0, 1); break;
     case T_BEND: {
-        /* Toward the note you drag to: across, the next square or the one before (right-handed the
+        /* Toward the note you drag to: across, the next square or the one before (unflipped the
            next is to the left); up and down, the row above or below. */
         int step = !across ? (flipped_y() ? -cols : cols) : mirrored() ? -1 : 1;
         int to = note_of(f->n + (v >= 0 ? step : -step));
@@ -257,13 +266,15 @@ static void apply(Expr* e, int target, float d, int across, const Finger* f, flo
         *semis += (float)(to - f->note) * amount;
         break;
     }
-    case T_VOLUME: e->volume = clampf(1 + v, 0, 1); break;
+    case T_VOLUME: e->volume = clampf(0.7f + (w >= 0 ? 0.3f : 0.7f) * w, 0, 1); break;   /* both ways, from 0.7 */
     default: break;
     }
 }
 
 static Expr expression(const Finger* f) {
+    /* Where nothing moves them: a firm press, the tone in the middle, full volume (or Volume's 0.7). */
     Expr e = {0, 0.75f, 0.5f, 1};
+    if ((int)set_[S_ACROSS] == T_VOLUME || (int)set_[S_UPDOWN] == T_VOLUME) e.volume = 0.7f;
     float semis = 0;
     apply(&e, (int)set_[S_ACROSS], (f->sx - f->x0) / cell, 1, f, &semis);
     apply(&e, (int)set_[S_UPDOWN], (f->y0 - f->sy) / cell, 0, f, &semis);

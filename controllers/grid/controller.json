@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "name": "Grid",
   "description": "Square keys, upright: the notes climb row by row; drag to bend toward the next, wiggle for vibrato",
   "author": "Patrick Reynolds",
