@@ -96,9 +96,18 @@ data class Option(
     val panel: (@Composable () -> Unit)? = null,
 )
 
-/** The controllers there are: built in, then the controller packages that come with the app. */
+/**
+ * The controllers there are: built in, then the controller packages that come with the app. The
+ * Grid is the package one from 0.22 (the same file odo for computers plays); KeyGrid, the Kotlin
+ * Grid it replaced, is no longer offered, and presets that used it open the package.
+ */
 object Controllers {
     var packaged: List<PackageController> = emptyList()
-    val all: List<Controller> get() = listOf(TouchPad, KeyGrid, Tonnetz, ExternalMidi) + packaged
-    fun byId(id: String?): Controller = all.firstOrNull { it.id == id } ?: TouchPad
+    private val builtIn: List<Controller> get() = listOf(TouchPad, Tonnetz, ExternalMidi)
+    val all: List<Controller> get() = builtIn + packaged
+    /** Older ids a package now answers to: the Kotlin Grid's. */
+    private val moved = mapOf(KeyGrid.id to "pkg:patrickreynolds/grid")
+    fun byId(id: String?): Controller = all.firstOrNull { it.id == (moved[id] ?: id) } ?: TouchPad
+    /** A package's name, told apart from a built-in controller of the same name. */
+    fun nameFor(name: String) = if (builtIn.any { it.name == name }) "$name (package)" else name
 }

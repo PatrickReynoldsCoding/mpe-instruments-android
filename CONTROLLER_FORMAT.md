@@ -65,7 +65,7 @@ Times are milliseconds on the MESH's clock. All but `touch` are optional.
 | `note_on(voice, part, pitch, pressure, slide, velocity, time)` | starts a note on part (sound) `part`; `pitch` in semitones, with fractions for bends; the rest 0..1 |
 | `note_change(voice, pitch, pressure, slide, time)` | moves a held note |
 | `note_off(voice, time)` | ends it |
-| `note_volume(voice, volume, time)` | a held note's own volume, 0..1 (1 when it starts): a fade apart from pressure. Optional. |
+| `note_volume(voice, volume, time)` | a note's own volume, 0..1: a fade apart from pressure. Called before `note_on` for the same voice, it is the volume the note starts at (else 1). Optional. |
 | `draw(list)` | replaces what is on screen: a list of shapes |
 | `save(state)` | state to keep between sessions (where the notes were dragged to, say). Not yet built. |
 

@@ -68,6 +68,7 @@ private:
     struct Chan { int voice = -1; int note = -1; int bend = -1, pressure = -1, slide = -1, volume = 127; };
     Chan ch_[16];
     std::vector<Note> later_;                       // notes it stamped for later (a strum, an arp)
+    std::vector<std::pair<int, float>> startVolume_; // note_volume for a voice that hasn't started yet
 };
 
 }  // namespace mpe

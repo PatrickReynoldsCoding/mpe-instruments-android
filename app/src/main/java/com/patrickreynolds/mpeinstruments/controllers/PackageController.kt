@@ -21,7 +21,7 @@ import java.util.zip.ZipInputStream
  */
 class PackageController(private val bytes: ByteArray, val manifest: JSONObject) : Controller {
     override val id: String = "pkg:" + manifest.optString("id")
-    override val name: String = manifest.optString("name", id) + " (package)"
+    override val name: String get() = Controllers.nameFor(manifest.optString("name", id))
     override val description: String = manifest.optString("description") + " · from a controller package (.odoc)"
     private val orientation = manifest.optString("orientation", "landscape")
     override val landscape = orientation != "portrait" && orientation != "upright"

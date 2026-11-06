@@ -142,6 +142,7 @@ void ControllerHost::setting(int index, double value) {
 void ControllerHost::stop() {
     if (w_ && w_->fStop) report(error_, m3_CallV(w_->fStop), "stop");
     later_.clear();
+    startVolume_.clear();
     for (int c = 1; c < 16; c++) {
         if (ch_[c].note >= 0) send(uint8_t(0x80 | c), uint8_t(ch_[c].note), 64);
         ch_[c] = Chan();
@@ -211,16 +212,27 @@ void ControllerHost::play(const Note& n) {
         h = Chan();
         h.voice = n.voice;
         h.note = std::clamp(int(std::lround(n.pitch)), 0, 127);
-        send(uint8_t(0xB0 | c), 7, 127);                               // this finger at full volume
+        // Its volume: full, unless note_volume said otherwise before it started.
+        auto pv = std::find_if(startVolume_.begin(), startVolume_.end(), [&](const auto& v) { return v.first == n.voice; });
+        h.volume = pv == startVolume_.end() ? 127 : std::clamp(int(std::lround(pv->second * 127)), 0, 127);
+        if (pv != startVolume_.end()) startVolume_.erase(pv);
+        send(uint8_t(0xB0 | c), 7, uint8_t(h.volume));
         send(uint8_t(0xB0 | c), 9, uint8_t(std::clamp(n.part, 0, 3) + 1));   // the part (sound) it plays
-        shape(c, n.pitch, n.pressure, n.slide);
         int vel = std::clamp(int(std::lround(n.velocity * 127 / velocityScale_)), 1, 127);
         send(uint8_t(0x90 | c), uint8_t(h.note), uint8_t(vel));
+        // After the note-on: the engine starts a finger's bend and pressure at zero.
+        shape(c, n.pitch, n.pressure, n.slide);
     } else if (n.kind == 1) {
         if (c) shape(c, n.pitch, n.pressure, n.slide);
     } else if (n.kind == 3) {                    // volume: carried in `pressure`
         int v = std::clamp(int(std::lround(n.pressure * 127)), 0, 127);
         if (c && v != ch_[c].volume) { ch_[c].volume = v; send(uint8_t(0xB0 | c), 7, uint8_t(v)); }
+        else if (!c) {                           // not started yet: its starting volume
+            startVolume_.erase(std::remove_if(startVolume_.begin(), startVolume_.end(), [&](const auto& x) { return x.first == n.voice; }),
+                               startVolume_.end());
+            startVolume_.push_back({n.voice, n.pressure});
+            if (startVolume_.size() > 64) startVolume_.erase(startVolume_.begin());
+        }
     } else if (c) {
         send(uint8_t(0x80 | c), uint8_t(ch_[c].note), 64);
         ch_[c] = Chan();

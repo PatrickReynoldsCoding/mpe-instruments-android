@@ -61,7 +61,7 @@ static void instrumentPackage() {
 #endif
 }
 
-struct Heard { int ons = 0, offs = 0; std::vector<int> notes; };
+struct Heard { int ons = 0, offs = 0; std::vector<int> notes; std::vector<int> kinds; };
 
 static void controllerPackage() {
     std::string err;
@@ -73,6 +73,7 @@ static void controllerPackage() {
     ControllerHost host([&](const uint8_t* m, int n) {
         if (n == 3 && (m[0] & 0xF0) == 0x90 && m[2] > 0) { h.ons++; h.notes.push_back(m[1]); }
         if (n == 3 && (m[0] & 0xF0) == 0x80) h.offs++;
+        h.kinds.push_back(m[0] & 0xF0);
     });
     CHECK(host.load(*pkg, &err), "wasm3 runs it (%s)", err.c_str());
     // 700 x 400 dp at size 7: dx = 100, the key's note (C) in the middle; the middle of the instrument is C4.
@@ -83,6 +84,10 @@ static void controllerPackage() {
     host.touch(1, ControllerHost::Down, 350, 200, 0, 0);          // the middle node: C
     CHECK(h.ons == 1 && h.notes.size() == 1 && h.notes[0] % 12 == 0, "a node plays its note (%d notes, first %d)", h.ons,
           h.notes.empty() ? -1 : h.notes[0]);
+    {   // The engine starts a finger's bend and pressure at zero, so they must follow the note-on.
+        auto on = std::find(h.kinds.begin(), h.kinds.end(), 0x90);
+        CHECK(on != h.kinds.end() && std::find(on, h.kinds.end(), 0xD0) != h.kinds.end(), "its pressure comes after the note-on");
+    }
     host.touch(1, ControllerHost::Up, 350, 200, 0, 0);
     CHECK(h.offs == 1, "lifting ends it");
 

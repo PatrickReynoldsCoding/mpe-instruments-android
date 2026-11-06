@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -270,10 +271,49 @@ struct App {
         int dir = x < kRail / 2 ? -1 : 1;
         if (row == 1) chooseController(controller + dir);
         else if (row == 2) chooseSound(sound + dir);
-        else if (host && row >= 4) {
-            size_t i = size_t(row - 4);
+        else if (host && y >= kSettingsTop && y < float(wh) - kBottom) {
+            size_t i = size_t((y - kSettingsTop + settingsScroll) / settingRow(float(wh)));
             if (i < settings.size()) changeSetting(i, dir);
         }
+    }
+
+    // A finger (or the mouse) on the rail: a tap acts when it lifts; a drag scrolls the settings.
+    // phase 0 down, 1 move, 2 up. True if the rail took it.
+    static constexpr SDL_FingerID kMouseFinger = SDL_FingerID(-1);
+    struct Press { bool on = false; SDL_FingerID id = 0; float x = 0, y0 = 0, last = 0; bool dragged = false; } press;
+    float settingsScroll = 0;
+
+    void scrollSettings(float by, float h) {
+        float rows = float(settings.size()) * settingRow(h), room = h - kBottom - kSettingsTop;
+        settingsScroll = std::clamp(settingsScroll + by, 0.f, std::max(0.f, rows - room));
+    }
+
+    bool railPress(int phase, SDL_FingerID id, float x, float y) {
+        int ww, wh;
+        SDL_GetWindowSize(window, &ww, &wh);
+        if (phase == 0) {
+            if (x >= railW() || press.on) return x < railW();
+            press = Press{true, id, x, y, y, false};
+            return true;
+        }
+        if (!press.on || press.id != id) return false;
+        if (phase == 1) {
+            if (std::fabs(y - press.y0) > 10) press.dragged = true;
+            if (press.dragged) scrollSettings(press.last - y, float(wh));
+            press.last = y;
+            return true;
+        }
+        press.on = false;
+        if (!press.dragged) railTap(press.x, press.y0);
+        return true;
+    }
+
+    // The controller's settings fill the rail between the sound and the lines at the bottom:
+    // each row as tall as fits, down to a compact one.
+    static constexpr float kSettingsTop = 3.7f * kRow, kBottom = 84;
+    float settingRow(float h) const {
+        if (settings.empty()) return kRow;
+        return std::clamp((h - kBottom - kSettingsTop) / float(settings.size()), 30.f, kRow);
     }
 
     void surfaceTouch(int id, mpe::ControllerHost::Phase ph, float x, float y, float force) {
@@ -289,8 +329,9 @@ struct App {
             case SDL_EVENT_FINGER_UP:
             case SDL_EVENT_FINGER_CANCELED: {
                 float x = e.tfinger.x * float(ww), y = e.tfinger.y * float(wh);
+                if (railPress(e.type == SDL_EVENT_FINGER_DOWN ? 0 : e.type == SDL_EVENT_FINGER_MOTION ? 1 : 2,
+                              e.tfinger.fingerID, x, y)) return;
                 if (e.type == SDL_EVENT_FINGER_DOWN) {
-                    if (x < railW()) { railTap(x, y); return; }
                     int id = nextFinger++;
                     fingers[e.tfinger.fingerID] = id;
                     surfaceTouch(id, mpe::ControllerHost::Down, x, y, e.tfinger.pressure);
@@ -309,19 +350,29 @@ struct App {
             // The mouse is one finger (id 0). Touches also arrive as mouse events: those are skipped.
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 if (e.button.which == SDL_TOUCH_MOUSEID || e.button.button != SDL_BUTTON_LEFT) return;
-                if (e.button.x < railW()) { railTap(e.button.x, e.button.y); return; }
+                if (railPress(0, kMouseFinger, e.button.x, e.button.y)) return;
                 mouseDown = true;
                 surfaceTouch(0, mpe::ControllerHost::Down, e.button.x, e.button.y, 0.8f);
                 return;
             case SDL_EVENT_MOUSE_MOTION:
-                if (e.motion.which == SDL_TOUCH_MOUSEID || !mouseDown) return;
+                if (e.motion.which == SDL_TOUCH_MOUSEID) return;
+                if (railPress(1, kMouseFinger, e.motion.x, e.motion.y)) return;
+                if (!mouseDown) return;
                 surfaceTouch(0, mpe::ControllerHost::Move, e.motion.x, e.motion.y, 0.8f);
                 return;
             case SDL_EVENT_MOUSE_BUTTON_UP:
-                if (e.button.which == SDL_TOUCH_MOUSEID || !mouseDown) return;
+                if (e.button.which == SDL_TOUCH_MOUSEID) return;
+                if (railPress(2, kMouseFinger, e.button.x, e.button.y)) return;
+                if (!mouseDown) return;
                 mouseDown = false;
                 surfaceTouch(0, mpe::ControllerHost::Up, e.button.x, e.button.y, 0);
                 return;
+            case SDL_EVENT_MOUSE_WHEEL: {
+                float mx, my;
+                SDL_GetMouseState(&mx, &my);
+                if (mx < railW()) scrollSettings(-e.wheel.y * 40, float(wh));
+                return;
+            }
             case SDL_EVENT_KEY_DOWN:
                 if (e.key.key == SDLK_TAB) { railHidden = !railHidden; surfaceW = 0; }
                 else if (e.key.key == SDLK_F11) SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
@@ -354,7 +405,23 @@ struct App {
         draw::line(renderer, 12, 3.5f * kRow, kRail - 12, 3.5f * kRow, rgba(0x9AA2B460), 1);
         if (host) {
             const mpe::Json& s = host->manifest()["settings"];
-            for (size_t i = 0; i < settings.size(); i++) row(int(4 + i), s[i]["name"].str(), settingValue(i), true);
+            float rh = settingRow(h);
+            scrollSettings(0, h);                // keep the scroll in range (the window may have grown)
+            bool big = rh >= 40;
+            for (size_t i = 0; i < settings.size(); i++) {
+                float y = kSettingsTop + float(i) * rh - settingsScroll;
+                if (y < kSettingsTop - 1 || y + rh > h - kBottom + 1) continue;   // scrolled out of the rail
+                draw::text(renderer, 12, y + (big ? 19 : 12), big ? 11 : 8, dim, s[i]["name"].str());
+                draw::text(renderer, 12, y + (big ? 37 : 26), big ? 13 : 10, text, settingValue(i));
+                float ay = big ? y + 34 : y + 25;
+                draw::text(renderer, kRail - 34, ay, big ? 13 : 11, dim, "<");
+                draw::text(renderer, kRail - 16, ay, big ? 13 : 11, dim, ">");
+            }
+            float rows = float(settings.size()) * rh, room = h - kBottom - kSettingsTop;
+            if (rows > room) {                   // a scroll bar: how much of the settings shows, and where
+                float bar = room * room / rows, at = kSettingsTop + (room - bar) * settingsScroll / (rows - room);
+                draw::fillRect(renderer, kRail - 4, at, 2, bar, rgba(0x9AA2B480), 1);
+            }
         }
         if (updater) {
             Updater::State us = updater->state();
@@ -469,6 +536,7 @@ int main(int argc, char** argv) {
     const char* selftestOut = nullptr;
     std::string controllerId, soundId;
     Selftest test;
+    std::vector<std::pair<int, double>> presetSettings;   // --setting INDEX=VALUE
     int width = 1280, height = 720;
     bool logMidi = false, checkUpdates = true;
     for (int i = 1; i < argc; i++) {
@@ -494,10 +562,14 @@ int main(int argc, char** argv) {
         else if (a == "--touch" && more && std::sscanf(argv[i + 1], "%f,%f", &x, &y) == 2) { test.touches.push_back({x, y}); i++; }
         else if (a == "--move" && more && std::sscanf(argv[i + 1], "%f,%f", &x, &y) == 2) { test.moveX = x; test.moveY = y; i++; }
         else if (a == "--expect" && more) test.expect = std::atoi(argv[++i]);
+        else if (a == "--setting" && more && std::strchr(argv[i + 1], '=')) {
+            presetSettings.push_back({std::atoi(argv[i + 1]), std::atof(std::strchr(argv[i + 1], '=') + 1)});
+            i++;
+        }
         else if (a == "--size" && more && std::sscanf(argv[i + 1], "%dx%d", &width, &height) == 2) i++;
         else {
             std::fprintf(stderr, "usage: odo [--library DIR]... [--controller ID] [--sound ID] [--log-midi] [--no-update] [--version]\n"
-                                 "           [--selftest out.bmp [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]\n");
+                                 "           [--setting INDEX=VALUE]... [--selftest out.bmp [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]\n");
             return 2;
         }
     }
@@ -544,6 +616,11 @@ int main(int argc, char** argv) {
     if (!controllerId.empty() && (app.lib.controllers.empty() || app.lib.controllers[size_t(ctl)]->id() != controllerId))
         std::fprintf(stderr, "odo: no controller %s in the library\n", controllerId.c_str());
     app.chooseController(ctl);
+    for (const auto& kv : presetSettings)
+        if (app.host && kv.first >= 0 && size_t(kv.first) < app.settings.size()) {
+            app.settings[size_t(kv.first)] = kv.second;
+            app.host->setting(kv.first, kv.second);
+        }
     app.chooseSound(sound);
 
     if (selftestOut) { int rc = selftest(app, selftestOut, test); app.shutdown(); SDL_Quit(); return rc; }

@@ -14,7 +14,11 @@ add_subdirectory(../engine engine)
 
 find_package(SDL3 REQUIRED CONFIG)
 # odo for computers' own version (its releases are tagged desktop-v<version>).
-set(ODO_DESKTOP_VERSION "0.0.1")
+set(ODO_DESKTOP_VERSION "0.0.2")
+# -DODO_TEST_VERSION=0.0.0: an older-numbered build, to try the updater with.
+if(ODO_TEST_VERSION)
+  set(ODO_DESKTOP_VERSION "${ODO_TEST_VERSION}")
+endif()
 add_executable(odo main.cpp draw.cpp update.cpp)
 target_compile_definitions(odo PRIVATE ODO_DESKTOP_VERSION="${ODO_DESKTOP_VERSION}")
 target_link_libraries(odo PRIVATE mpe_engine SDL3::SDL3)

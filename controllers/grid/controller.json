@@ -1,0 +1,257 @@
+{
+  "format": 1,
+  "id": "patrickreynolds/grid",
+  "version": "1.1.0",
+  "name": "Grid",
+  "description": "Square keys, upright: the notes climb row by row; drag to bend toward the next, wiggle for vibrato",
+  "author": "Patrick Reynolds",
+  "licence": "MIT",
+  "needs": {
+    "fingers": 10,
+    "touchSize": false
+  },
+  "orientation": "upright",
+  "parts": [
+    "Main"
+  ],
+  "arp": "app",
+  "settings": [
+    {
+      "id": "cols",
+      "name": "Squares across",
+      "type": "number",
+      "min": 2,
+      "max": 8,
+      "step": 1,
+      "default": 3
+    },
+    {
+      "id": "squareSize",
+      "name": "Square size (%)",
+      "type": "number",
+      "min": 50,
+      "max": 100,
+      "step": 5,
+      "default": 100
+    },
+    {
+      "id": "spacing",
+      "name": "Spacing (%)",
+      "type": "number",
+      "min": 2,
+      "max": 30,
+      "step": 1,
+      "default": 9
+    },
+    {
+      "id": "flipAcross",
+      "name": "Flip across",
+      "type": "switch",
+      "default": false
+    },
+    {
+      "id": "flipUpDown",
+      "name": "Flip up/down",
+      "type": "switch",
+      "default": false
+    },
+    {
+      "id": "chromatic",
+      "name": "Notes",
+      "type": "choice",
+      "options": [
+        "The scale's notes",
+        "Chromatic"
+      ],
+      "default": 0
+    },
+    {
+      "id": "scale",
+      "name": "Scale",
+      "type": "choice",
+      "options": [
+        "Major",
+        "Minor",
+        "Dorian",
+        "Mixolydian",
+        "Harmonic minor",
+        "Pentatonic major",
+        "Pentatonic minor",
+        "Blues",
+        "Chromatic"
+      ],
+      "default": 0
+    },
+    {
+      "id": "key",
+      "name": "Key",
+      "type": "choice",
+      "options": [
+        "C",
+        "C♯",
+        "D",
+        "E♭",
+        "E",
+        "F",
+        "F♯",
+        "G",
+        "A♭",
+        "A",
+        "B♭",
+        "B"
+      ],
+      "default": 0
+    },
+    {
+      "id": "octave",
+      "name": "Octave",
+      "type": "number",
+      "min": -3,
+      "max": 3,
+      "step": 1,
+      "default": 0
+    },
+    {
+      "id": "xTarget",
+      "name": "Across",
+      "type": "choice",
+      "options": [
+        "Nothing",
+        "Loudness",
+        "Tone",
+        "Bend",
+        "Volume"
+      ],
+      "default": 3
+    },
+    {
+      "id": "yTarget",
+      "name": "Up/down",
+      "type": "choice",
+      "options": [
+        "Nothing",
+        "Loudness",
+        "Tone",
+        "Bend",
+        "Volume"
+      ],
+      "default": 2
+    },
+    {
+      "id": "vibrato",
+      "name": "Vibrato",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Light",
+        "Normal",
+        "Wide"
+      ],
+      "default": 2
+    },
+    {
+      "id": "labels",
+      "name": "Note names",
+      "type": "switch",
+      "default": false
+    },
+    {
+      "id": "theme",
+      "name": "Look",
+      "type": "choice",
+      "options": [
+        "Neon",
+        "Ember",
+        "Ice",
+        "Violet",
+        "Sunset",
+        "Paper"
+      ],
+      "default": 0
+    },
+    {
+      "id": "colours",
+      "name": "Colours",
+      "type": "choice",
+      "options": [
+        "Plain",
+        "Every degree",
+        "Chord tones",
+        "Root, 4th, 5th",
+        "By note name"
+      ],
+      "default": 0
+    },
+    {
+      "id": "latch",
+      "name": "Latch",
+      "type": "switch",
+      "default": false
+    },
+    {
+      "id": "latchMode",
+      "name": "Latch: the next touch",
+      "type": "choice",
+      "options": [
+        "New hand replaces",
+        "Tap on, tap off"
+      ],
+      "default": 0
+    },
+    {
+      "id": "scrollBar",
+      "name": "Scroll bar",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Left",
+        "Right"
+      ],
+      "default": 2
+    },
+    {
+      "id": "sideLatch",
+      "name": "Latch button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Left",
+        "Right"
+      ],
+      "default": 1
+    },
+    {
+      "id": "sideHold",
+      "name": "Hold button",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Left",
+        "Right"
+      ],
+      "default": 0
+    },
+    {
+      "id": "sideBend",
+      "name": "Bend slider",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Left",
+        "Right"
+      ],
+      "default": 0
+    },
+    {
+      "id": "sideTone",
+      "name": "Tone slider",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Left",
+        "Right"
+      ],
+      "default": 0
+    }
+  ]
+}
