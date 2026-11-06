@@ -115,7 +115,8 @@ private fun TempoCard() {
 private fun ScaleCard() {
     val perf = AppState.perf
     SectionCard("Pitch assist") {
-        Text("When a finger comes to rest it is drawn onto the nearest note of the scale. Glides and vibrato are left alone.",
+        Text("When a finger comes to rest it is drawn into tune: onto the note it is on, even one outside the scale, or, if it " +
+             "stopped between two notes, onto the nearest note of the scale. Glides and vibrato are left alone.",
              color = TextDim, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
         Chips(SCALES.map { it.name }, perf.scale) { i -> AppState.update { it.copy(scale = i) } }

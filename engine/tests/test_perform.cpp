@@ -329,6 +329,22 @@ int main() {
         CHECK(std::fabs(pitch - 65) < 0.02f, "assist: where the glide stops, it settles on the scale note (%.3f)", pitch);
     }
     {
+        // A note outside the scale, played on purpose, stays in tune (F# and Bb in C major).
+        for (int note : {66, 70}) {
+            Rig r("synths/fm-keys");
+            Performance p;
+            p.scaleMask = 0b101010110101;                   // C major
+            p.assist = 1;
+            r.engine.setPerformance(p);
+            r.run(0.01);
+            r.noteOn(1, note, 80);
+            r.bend(1, 8192 + int(8192 * 0.15 / 48));        // and resting 15 cents sharp of it
+            r.run(0.4);
+            float pitch = voicesOf(r)[0].pitch;
+            CHECK(std::fabs(pitch - note) < 0.02f, "assist: note %d, outside the scale, is pulled onto itself, not the scale (%.3f)", note, pitch);
+        }
+    }
+    {
         Rig r("synths/fm-keys");
         r.noteOn(1, 60, 80);
         r.bend(1, 8192 + int(8192 * 0.4 / 48));

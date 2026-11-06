@@ -120,6 +120,15 @@ object AppState {
             (0 until a.length()).map { Preset.from(a.getJSONObject(it)) }
         }.getOrDefault(emptyList())
         if (!prefs.getBoolean("presetsStarted", false)) startPresets()
+        // Until 0.15.1 pitch assist dragged notes outside its scale out of tune, and two built-in
+        // presets turned it on: turn it off once, everywhere (Perform turns it back on).
+        if (!prefs.getBoolean("assistOff", false)) {
+            perf = perf.copy(scale = 0)
+            userPresets = userPresets.map { it.copy(perf = it.perf.copy(scale = 0)) }
+            if (presetName == "Violin, in tune") presetName = ""
+            prefs.edit().putBoolean("assistOff", true).putString("perf", perf.json().toString()).apply()
+            savePresets()
+        }
         applyAll()
     }
 
@@ -370,7 +379,7 @@ private fun two(a: Part, b: Part = Part(instrument = "voices/soprano")) = listOf
 /** A starting point for each kind of playing. */
 val BUILT_IN_PRESETS = listOf(
     preset("Solo cello", Perf(parts = two(Part("strings/cello", reverb = 0.25f)), reverbSize = 0.6f)),
-    preset("Violin, in tune", Perf(scale = 1, assist = 0.7f, parts = two(Part("strings/violin", reverb = 0.25f)))),
+    preset("Solo violin", Perf(parts = two(Part("strings/violin", reverb = 0.25f)))),
     preset("Breathy flute", Perf(parts = two(Part("winds/flute", reverb = 0.35f, pressureCurve = 0.7f)), reverbSize = 0.75f)),
     preset("Choir layer", Perf(layout = 2, parts = listOf(
         Part("strings/cello", reverb = 0.3f, volume = 0.8f),
@@ -383,7 +392,7 @@ val BUILT_IN_PRESETS = listOf(
         Part("strings/cello", reverb = 0.3f)))),
     preset("Pluck arp", Perf(bpm = 118f, delayBeats = 0.75f, delayFeedback = 0.4f, parts = two(
         Part("plucked/steel-guitar", arp = true, order = 0, rate = 4f, gate = 0.4f, octaves = 2, reverb = 0.2f, delay = 0.35f)))),
-    preset("Dreamy pad", Perf(scale = 6, assist = 0.5f, reverbSize = 0.95f, parts = two(
+    preset("Dreamy pad", Perf(reverbSize = 0.95f, parts = two(
         Part("synths/pad", brightness = 0.7f, reverb = 0.6f, delay = 0.15f, pressureCurve = 0.8f)))),
     preset("Gritty lead", Perf(bpm = 124f, parts = two(Part("synths/lead", drive = 0.5f, brightness = 0.85f, reverb = 0.15f, delay = 0.3f)))),
     preset("Vibraphone, latched", Perf(bpm = 90f, parts = two(

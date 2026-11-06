@@ -331,8 +331,10 @@ void Engine::stepArp(int p, int64_t frame) {
     P.gateOff = gate >= 0.999f ? INT64_MAX : frame + std::max<int64_t>(1, int64_t(gate * stepLen));
 }
 
-// Pitch assist: while a finger rests (pitch moving slower than 4 semitones/s), pull it towards
-// the nearest note of the scale, by `assist`, over about 80 ms. A glide is left alone.
+// Pitch assist: while a finger rests (pitch moving slower than 4 semitones/s), pull it into tune,
+// by `assist`, over about 80 ms. Near a semitone (within 30 cents) that is the semitone, in the
+// scale or not: a note played on purpose stays in tune. Between notes (where a glide stopped) it is
+// the nearest note of the scale. A glide itself is left alone.
 // Bend arrives in steps a few ms apart, so the speed is a peak that decays over ~30 ms; a block
 // between two steps does not count as resting.
 float Engine::assisted(float pitch, float& pull, float& prev, float& speed, float dt) const {
@@ -341,6 +343,8 @@ float Engine::assisted(float pitch, float& pull, float& prev, float& speed, floa
     if (!perf_.scaleMask || perf_.assist <= 0) { pull = 0; return pitch; }
     pull = smoothTo(pull, speed < 4.f ? perf_.assist : 0.f, 1.f - std::exp(-dt / 0.08f));
     const float rel = pitch - perf_.scaleRoot;
+    const float semi = std::round(rel);
+    if (std::fabs(rel - semi) < 0.3f) return pitch + (semi + perf_.scaleRoot - pitch) * pull;
     const int base = int(std::floor(rel));
     float nearest = rel, bestDist = 1e9f;
     for (int k = -6; k <= 7; k++) {
