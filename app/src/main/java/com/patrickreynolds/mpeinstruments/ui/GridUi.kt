@@ -23,6 +23,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
@@ -38,33 +39,39 @@ import com.patrickreynolds.mpeinstruments.PadSettings
 import com.patrickreynolds.mpeinstruments.SCALES
 import com.patrickreynolds.mpeinstruments.controllers.KeyGrid
 import com.patrickreynolds.mpeinstruments.controllers.Option
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.floor
+import kotlin.math.log10
 import kotlin.math.roundToInt
 
 /** The grid's options on the rail. */
 @Composable
 fun keyGridOptions(): List<Option> {
     val s = KeyGrid.settings
-    val accent = if (Eink) Color.Black else PartColors[0]
+    val accent = if (Eink) Color.Black else NEON
     fun set(change: (KeyGrid.Settings) -> KeyGrid.Settings) = KeyGrid.update(change)
     return listOf(
-        Option("Grid", "${s.rows} × ${s.cols}", perPart = false) {
-            Text("Rows", color = TextDim, fontSize = 13.sp)
-            Chips(KeyGrid.ROWS.map { "$it" }, s.rows - KeyGrid.ROWS.first, accent) { k -> set { it.copy(rows = KeyGrid.ROWS.first + k) } }
-            Text("Squares in a row", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-            Chips(KeyGrid.COLS.map { "$it" }, s.cols - KeyGrid.COLS.first, accent) { k -> set { it.copy(cols = KeyGrid.COLS.first + k) } }
-            Text("Each row carries on from the one below it, like keyboards stacked.", color = TextDim, fontSize = 12.sp)
+        Option("Grid", "${s.cols} × ${s.rows}", perPart = false) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Squares across", color = TextDim, fontSize = 13.sp)
+                Chips(KeyGrid.COLS.map { "$it" }, s.cols - KeyGrid.COLS.first, accent) { k -> set { it.copy(cols = KeyGrid.COLS.first + k) } }
+                Text("Rows up", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                Chips(KeyGrid.ROWS.map { "$it" }, s.rows - KeyGrid.ROWS.first, accent) { k -> set { it.copy(rows = KeyGrid.ROWS.first + k) } }
+                Text("The notes climb row by row from the bottom left: three fingers on a row of three play three neighbouring " +
+                     "notes, and the next row carries on.", color = TextDim, fontSize = 12.sp)
+            }
         },
         Option("Notes", if (s.chromatic) "Chromatic" else SCALES[s.scale].name, perPart = false) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Segmented(listOf("The scale's notes", "Chromatic"), if (s.chromatic) 1 else 0, accent) { k -> set { it.copy(chromatic = k == 1) } }
-                Text(if (s.chromatic) "Every semitone; the notes outside the scale are darkened, like a piano's black keys."
+                Text(if (s.chromatic) "Every semitone; the notes outside the scale are dimmed, their outlines broken."
                      else "Only the scale's notes, so every square fits.", color = TextDim, fontSize = 12.sp)
                 Text("Scale", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                 Chips(SCALES.drop(1).map { it.name }, s.scale - 1, accent) { k -> set { it.copy(scale = k + 1) } }
                 Text("Key", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                 Chips(NOTE_NAMES, s.key, accent) { k -> set { it.copy(key = k) } }
+                SwitchRow("Note names", s.labels, "The root's square is lit either way", accent = accent) { v -> set { it.copy(labels = v) } }
             }
         },
         Option("Octave", if (s.octave == 0) "0" else "%+d".format(s.octave), perPart = false) {
@@ -72,13 +79,11 @@ fun keyGridOptions(): List<Option> {
         },
         Option("Across", KeyGrid.TARGETS[s.xTarget], perPart = false) {
             Chips(KeyGrid.TARGETS, s.xTarget, accent) { k -> set { it.copy(xTarget = k) } }
-            axisHelp(s.bendRange)
-            if (s.xTarget == KeyGrid.BEND || s.yTarget == KeyGrid.BEND) BendRange(s.bendRange, accent)
+            AxisHelp()
         },
         Option("Up/down", KeyGrid.TARGETS[s.yTarget], perPart = false) {
             Chips(KeyGrid.TARGETS, s.yTarget, accent) { k -> set { it.copy(yTarget = k) } }
-            axisHelp(s.bendRange)
-            if (s.xTarget == KeyGrid.BEND || s.yTarget == KeyGrid.BEND) BendRange(s.bendRange, accent)
+            AxisHelp()
         },
         Option("Vibrato", PadSettings.VIBRATO[s.vibrato], perPart = false) {
             Chips(PadSettings.VIBRATO, s.vibrato, accent) { k -> set { it.copy(vibrato = k) } }
@@ -91,21 +96,17 @@ fun keyGridOptions(): List<Option> {
                 TempoControls(accent)
             }
         },
-        Option("Labels", if (s.labels) "On" else "Off", perPart = false, on = false, tap = { set { it.copy(labels = !it.labels) } }),
     )
 }
 
 @Composable
-private fun axisHelp(bend: Int) = Text(
-    "Hold a square and move it: a whole square's move is the full change. Loudness and tone start in the middle; volume " +
-    "only fades; bend goes up to $bend semitones.", color = TextDim, fontSize = 12.sp)
+private fun AxisHelp() = Text(
+    "Hold a square and move it; a whole square's move is the full change. Bend glides toward the note you drag to, " +
+    "reaching it a square away. Loudness and tone start in the middle; volume only fades.", color = TextDim, fontSize = 12.sp)
 
-@Composable
-private fun BendRange(v: Int, accent: Color) {
-    Text("Bend for a whole square", color = TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-    Chips(listOf("1", "2", "3", "5", "7", "12"), listOf(1, 2, 3, 5, 7, 12).indexOf(v), accent) { k ->
-        KeyGrid.update { it.copy(bendRange = listOf(1, 2, 3, 5, 7, 12)[k]) } }
-}
+/** The grid's light: neon on black. */
+private val NEON = Color(0xFF23FFD0)
+private val NEON_WHITE = Color(0xFFDCFFF8)
 
 /** The grid's play surface. */
 @Composable
@@ -122,7 +123,6 @@ fun KeyGridSurface() {
             if (!Eink || grid.takeDirty()) frame++
         }
     }
-    val theme = hostTheme()
     grid.settings = KeyGrid.settings
     grid.center = (AppState.instrument(0)?.centerNote ?: 60f) + 12f * KeyGrid.settings.octave
     Canvas(Modifier.fillMaxSize().clipToBounds().systemGestureExclusion()
@@ -144,59 +144,83 @@ fun KeyGridSurface() {
         }) {
         frame.let { }
         grid.size(size.width, size.height, density)
-        grid.draw(this, theme)
+        grid.draw(this)
     }
 }
 
-/** The squares and the fingers on them. Row 0 is the bottom one; a row carries on from the one below. */
+/**
+ * The squares and the fingers on them. Square n counts along the rows from the bottom left; the
+ * grid keeps its squares square and sits at the bottom, leaving the top for the loop buttons.
+ */
 private class Grid {
     var settings = KeyGrid.Settings()
     var center = 60f
     private var w = 1f; private var h = 1f; private var density = 1f
-    private val gap get() = 6f * density
 
     fun size(width: Float, height: Float, d: Float) { w = width; h = height; density = d }
-    private val cw get() = w / settings.cols
-    private val ch get() = h / settings.rows
+    private val pad get() = 10f * density
+    /** A square's side with its gap, and the grid's bottom left corner. */
+    private val cell get() = minOf((w - 2 * pad) / settings.cols, (h - 2 * pad) / settings.rows)
+    private val gap get() = cell * 0.09f
+    private val left get() = (w - cell * settings.cols) / 2
+    private val bottom get() = h - pad
 
     private val mask get() = SCALES[settings.scale].mask.let { if (it == 0) 0xFFF else it }
     private fun inScale(note: Int) = (mask shr (((note - settings.key) % 12 + 12) % 12)) and 1 == 1
     private val degrees get() = (0 until 12).filter { (mask shr it) and 1 == 1 }
+    private val count get() = settings.rows * settings.cols
 
-    /** The note of square n (counted along the rows from the bottom left). */
+    /** The note of square n. The grid starts on the key, so its middle sits near the middle of the instrument. */
     private fun noteOf(n: Int): Int {
-        val count = settings.rows * settings.cols
         val step = if (settings.chromatic) 1 else degrees.size
         val span = if (settings.chromatic) count else 12 * count / step
-        // Start on the key, so the middle of the grid sits near the middle of the instrument.
-        val low = center - span / 2f
-        val base = settings.key + 12 * floor((low - settings.key) / 12f + 0.5f).toInt()
-        return (if (settings.chromatic) base + n else base + 12 * (n / step) + degrees[n % step]).coerceIn(0, 127)
+        val base = settings.key + 12 * floor((center - span / 2f - settings.key) / 12f + 0.5f).toInt()
+        val k = n.coerceIn(0, count - 1)
+        return (if (settings.chromatic) base + k else base + 12 * (k / step) + degrees[k % step]).coerceIn(0, 127)
     }
 
-    private fun squareAt(x: Float, y: Float): Pair<Int, Int> {
-        val c = (x / cw).toInt().coerceIn(0, settings.cols - 1)
-        val r = (settings.rows - 1 - (y / ch).toInt()).coerceIn(0, settings.rows - 1)
-        return r to c
+    private fun squareAt(x: Float, y: Float): Int? {
+        val c = floor((x - left) / cell).toInt()
+        val r = floor((bottom - y) / cell).toInt()
+        if (c !in 0 until settings.cols || r !in 0 until settings.rows) return null
+        return r * settings.cols + c
     }
+    private fun squareOrigin(n: Int) = Offset(left + (n % settings.cols) * cell, bottom - (n / settings.cols + 1) * cell)
 
-    private inner class Finger(val channel: Int, val note: Int, val r: Int, val c: Int, val x0: Float, val y0: Float) {
+    private inner class Finger(val channel: Int, val n: Int, val note: Int, val x0: Float, val y0: Float) {
         var x = x0; var y = y0
         var sx = x0; var sy = y0            // the finger's slow position: the axes follow it, vibrato is what is left
         var pressure = -1; var slide = -1; var bend = -1; var volume = -1
-        var glow = 1f
+    }
+
+    /**
+     * A square still sounding after its finger lifted: its voice (by channel) is followed in the
+     * engine, and the room's reverb rings on after it, as loud as this part's reverb send.
+     */
+    private class Ringing(val channel: Int, val note: Int, val n: Int, var peak: Float, val send: Float, val t60: Float) {
+        var t = 0f; var voice = 1f; var glow = 1f
     }
 
     private val fingers = HashMap<Long, Finger>()
+    private val ringing = mutableListOf<Ringing>()
+    private val lastUsed = LongArray(16)
+    private var clock = 0L
     private var dirty = true
     fun takeDirty() = dirty.also { dirty = false }
     private fun send(status: Int, d1: Int, d2: Int) = Native.nativeTouch(status, d1, d2)
 
-    fun down(id: Long, x: Float, y: Float) {
+    /** A channel no finger holds, the one silent longest, so a note still ringing on another is not cut off. */
+    private fun freeChannel(): Int? {
         val used = fingers.values.map { it.channel }.toSet()
-        val ch = (15 downTo 1).firstOrNull { it !in used } ?: return
-        val (r, c) = squareAt(x, y)
-        val f = Finger(ch, noteOf(r * settings.cols + c), r, c, x, y)
+        return (1..15).filter { it !in used }.minByOrNull { lastUsed[it] }
+    }
+
+    fun down(id: Long, x: Float, y: Float) {
+        val n = squareAt(x, y) ?: return
+        val ch = freeChannel() ?: return
+        lastUsed[ch] = ++clock
+        ringing.removeAll { it.channel == ch }
+        val f = Finger(ch, n, noteOf(n), x, y)
         fingers[id] = f
         val e = expression(f)
         f.volume = e.volume
@@ -216,44 +240,79 @@ private class Grid {
     fun up(id: Long) {
         val f = fingers.remove(id) ?: return
         send(0x80 or f.channel, f.note, 64)
-        lifted += f
+        lastUsed[f.channel] = ++clock
+        val p = AppState.perf
+        ringing += Ringing(f.channel, f.note, f.n, levelOf(f.channel, f.note).coerceAtLeast(1e-4f),
+                           p.part(0).reverb, 0.7f + p.reverbSize * 5.3f)
         dirty = true
     }
 
     fun releaseAll() { for (id in fingers.keys.toList()) up(id) }
 
-    private val lifted = mutableListOf<Finger>()
+    // ---- what the engine is playing ------------------------------------------------------------
+    private val voices = FloatArray(32 * 8)
+    private var nVoices = 0
+    /**
+     * How loud the voice playing [note] on [channel] is now. Once its finger lifts the engine no
+     * longer says whose it was (finger -1), so a ringing voice is found by its note.
+     */
+    private fun levelOf(channel: Int, note: Int): Float {
+        var level = 0f
+        for (i in 0 until nVoices) {
+            val b = 8 * i
+            val finger = voices[b + 1].toInt()
+            if (voices[b + 2].toInt() == note && (finger == channel || finger == -1)) level = maxOf(level, voices[b + 7])
+        }
+        return level
+    }
+    /** A level as light: 0 dB is full, 42 dB down is dark, so the light fades as the ear hears it fade. */
+    private fun light(ratio: Float) = if (ratio <= 0f) 0f else (1f + 20f * log10(ratio) / 42f).coerceIn(0f, 1f)
 
     fun tick(dt: Float) {
+        nVoices = Native.nativeVoices(voices)
         // The slow position trails the finger by about 0.12 s: a wiggle is faster than that.
         val k = 1f - exp(-dt / 0.12f)
         for (f in fingers.values) {
             f.sx += (f.x - f.sx) * k; f.sy += (f.y - f.sy) * k
             sendExpression(f)
         }
-        for (f in lifted) f.glow -= dt * 2.5f
-        lifted.removeAll { it.glow <= 0f }
-        if (fingers.isNotEmpty() || lifted.isNotEmpty()) dirty = true
+        for (r in ringing) {
+            r.t += dt
+            val level = levelOf(r.channel, r.note)
+            if (r.t < 0.05f) r.peak = maxOf(r.peak, level)          // the level as it was let go
+            r.voice = light(level / r.peak)
+            // The reverb's tail: the send's share of the sound, dying away over the room's T60.
+            val tail = if (r.send <= 0.001f) 0f else light(r.send * exp(-6.9f * r.t / r.t60)) * 0.8f
+            r.glow = maxOf(r.voice, tail)
+        }
+        ringing.removeAll { it.glow <= 0.004f && it.t > 0.05f }
+        if (fingers.isNotEmpty() || ringing.isNotEmpty()) dirty = true
     }
 
     private class Expr(val pressure: Int, val slide: Int, val bend: Int, val volume: Int)
 
     /** The axes, from how far the finger has moved (slowly) from where it came down; vibrato from the rest. */
     private fun expression(f: Finger): Expr {
-        val dx = (f.sx - f.x0) / cw
-        val dy = (f.y0 - f.sy) / ch
-        var pressure = 0.7f; var slide = 0.5f; var semis = 0f; var volume = 1f
-        fun apply(target: Int, d: Float) {
+        val dx = (f.sx - f.x0) / cell
+        val dy = (f.y0 - f.sy) / cell
+        var pressure = 0.75f; var slide = 0.5f; var semis = 0f; var volume = 1f
+        fun apply(target: Int, d: Float, across: Boolean) {
             val v = d.coerceIn(-1f, 1f)
             when (target) {
-                KeyGrid.LOUDNESS -> pressure = (0.7f + 0.5f * v).coerceIn(0.02f, 1f)
+                KeyGrid.LOUDNESS -> pressure = (0.75f + 0.5f * v).coerceIn(0.02f, 1f)
                 KeyGrid.TONE -> slide = (0.5f + 0.5f * v).coerceIn(0f, 1f)
-                KeyGrid.BEND -> semis += v * settings.bendRange
+                // Toward the note you drag to: across, the next square or the one before; up and down, the row above or below.
+                KeyGrid.BEND -> {
+                    val step = if (across) 1 else settings.cols
+                    val to = noteOf(f.n + if (v >= 0) step else -step)
+                    val amount = ((abs(v) - 0.08f) / 0.92f).coerceIn(0f, 1f)
+                    semis += (to - f.note) * amount
+                }
                 KeyGrid.VOLUME -> volume = (1f + v).coerceIn(0f, 1f)
             }
         }
-        apply(settings.xTarget, dx)
-        apply(settings.yTarget, dy)
+        apply(settings.xTarget, dx, true)
+        apply(settings.yTarget, dy, false)
         val depth = PadSettings.VIBRATO_DEPTH.getOrElse(settings.vibrato) { 0f }
         if (depth > 0f) semis += ((f.x - f.sx) / density * 0.08f * depth / 0.5f).coerceIn(-depth, depth)
         val bend = (8192 + semis / 48f * 8192).roundToInt().coerceIn(0, 16383)
@@ -268,48 +327,57 @@ private class Grid {
         if (e.pressure != f.pressure) { f.pressure = e.pressure; send(0xD0 or f.channel, e.pressure, 0) }
     }
 
-    fun draw(d: DrawScope, t: PadTheme) = with(d) {
-        val flat = t.flat
-        if (flat) drawRect(Color.White) else drawRect(Brush.verticalGradient(listOf(t.top, t.mid, t.bottom)))
-        val accent = if (flat) Color.Black else t.parts[0]
+    // ---- drawing: neon outlines on black; a held square full of light, fading as its sound does ----
+    fun draw(d: DrawScope) = with(d) {
+        val flat = Eink
+        drawRect(if (flat) Color.White else Color.Black)
+        val light = if (flat) Color.Black else NEON
         val text = android.graphics.Paint().apply { isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER }
-        val held = fingers.values.associateBy { it.r to it.c }
-        for (r in 0 until settings.rows) for (c in 0 until settings.cols) {
-            val note = noteOf(r * settings.cols + c)
-            val x = c * cw + gap / 2; val y = (settings.rows - 1 - r) * ch + gap / 2
-            val sz = Size(cw - gap, ch - gap)
-            val off = settings.chromatic && !inScale(note)
+        val held = fingers.values.map { it.n }.toSet()
+        val glowOf = FloatArray(count)
+        for (r in ringing) if (r.n < count) glowOf[r.n] = maxOf(glowOf[r.n], r.glow)
+        val radius = CornerRadius(cell * 0.08f)
+        val side = cell - gap
+        val dash = PathEffect.dashPathEffect(floatArrayOf(6f * density, 5f * density))
+        for (n in 0 until count) {
+            val o = squareOrigin(n) + Offset(gap / 2, gap / 2)
+            val sz = Size(side, side)
+            val note = noteOf(n)
             val root = ((note - settings.key) % 12 + 12) % 12 == 0
-            val f = held[r to c]
-            val fade = lifted.filter { it.r == r && it.c == c }.maxOfOrNull { it.glow } ?: 0f
-            val fill = when {
-                flat && f != null -> Color.Black
-                flat && off -> Color(0xFFBDBDBD)
-                flat -> Color.White
-                f != null -> accent.copy(alpha = 0.75f)
-                off -> Color.Black.copy(alpha = 0.55f)
-                root -> t.line.copy(alpha = 0.16f)
-                else -> t.line.copy(alpha = 0.08f)
+            val off = settings.chromatic && !inScale(note)
+            val on = n in held
+            val glow = if (on) 1f else glowOf[n]
+            // The light: an outer bloom, then the fill.
+            if (glow > 0f) {
+                if (!flat) drawRoundRect(light.copy(alpha = 0.28f * glow), o - Offset(6f * density, 6f * density),
+                                         Size(side + 12f * density, side + 12f * density), CornerRadius(radius.x + 6f * density))
+                drawRoundRect(light.copy(alpha = (if (flat) 1f else 0.92f) * glow), o, sz, radius)
             }
-            drawRoundRect(fill, Offset(x, y), sz, CornerRadius(14f * density))
-            if (!flat && fade > 0f) drawRoundRect(accent.copy(alpha = 0.5f * fade), Offset(x, y), sz, CornerRadius(14f * density))
-            drawRoundRect(if (flat) Color.Black else if (root) accent.copy(alpha = 0.7f) else t.line.copy(alpha = 0.18f), Offset(x, y), sz,
-                          CornerRadius(14f * density), style = Stroke(width = if (root) 3f * density else 1.5f * density))
+            // The outline: the root's fully lit, the scale's faint, a note outside the scale broken.
+            val edge = when {
+                on || glow > 0.6f -> if (flat) Color.Black else NEON_WHITE
+                root -> light
+                off -> light.copy(alpha = if (flat) 0.4f else 0.12f)
+                else -> light.copy(alpha = if (flat) 0.8f else 0.22f)
+            }
+            if (root && !flat && !on) drawRoundRect(light.copy(alpha = 0.18f), o - Offset(3f * density, 3f * density),
+                                                    Size(side + 6f * density, side + 6f * density), CornerRadius(radius.x + 3f * density),
+                                                    style = Stroke(width = 6f * density))
+            drawRoundRect(edge, o, sz, radius, style = Stroke(width = (if (root) 2f else 1.5f) * density,
+                                                              pathEffect = if (off && glow == 0f) dash else null))
             if (settings.labels) {
-                text.textSize = minOf(cw, ch) * 0.22f
+                text.textSize = side * 0.16f
                 text.isFakeBoldText = root
-                text.color = (when { flat && f != null -> Color.White; flat -> Color.Black; f != null -> Color.Black
-                                     off -> t.label.copy(alpha = 0.45f); else -> t.label.copy(alpha = 0.9f) }).toArgb()
+                text.color = (if (glow > 0.5f) (if (flat) Color.White else Color(0xFF002A22)) else light.copy(alpha = if (off) 0.35f else 0.7f)).toArgb()
                 val name = NOTE_NAMES[note % 12] + if (root) "${note / 12 - 1}" else ""
-                drawContext.canvas.nativeCanvas.drawText(name, x + sz.width / 2, y + sz.height / 2 + text.textSize * 0.35f, text)
+                drawContext.canvas.nativeCanvas.drawText(name, o.x + side / 2, o.y + side / 2 + text.textSize * 0.35f, text)
             }
         }
-        // Each finger: a light where it is, a line back to where it came down (the axes' move).
-        for (f in fingers.values) {
-            if (!flat) drawLine(Color.White.copy(alpha = 0.5f), Offset(f.x0, f.y0), Offset(f.sx, f.sy), strokeWidth = 3f * density)
-            if (!flat) drawCircle(Brush.radialGradient(listOf(accent.copy(alpha = 0.55f), accent.copy(alpha = 0f)), center = Offset(f.x, f.y),
-                                                       radius = 70f * density), 70f * density, Offset(f.x, f.y))
-            drawCircle(if (flat) Color.Black else Color.White, 9f * density, Offset(f.x, f.y))
+        // A halo that follows each finger.
+        if (!flat) for (f in fingers.values) {
+            val r = cell * 0.9f
+            drawCircle(Brush.radialGradient(listOf(NEON_WHITE.copy(alpha = 0.5f), NEON.copy(alpha = 0.22f), NEON.copy(alpha = 0f)),
+                                            center = Offset(f.x, f.y), radius = r), r, Offset(f.x, f.y))
         }
     }
 }
