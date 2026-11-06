@@ -62,11 +62,22 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject) 
         AppState.controllerChanged(this, engine = false)
     }
 
-    override fun save(): JSONObject = JSONObject().put("values", JSONArray(values))
+    /** Its settings by name, so a new version that adds or moves settings keeps the rest. */
+    override fun save(): JSONObject = JSONObject().put("byId", JSONObject().apply {
+        settings.forEachIndexed { k, st -> put(st.optString("id", "$k"), values[k]) }
+    })
 
     override fun load(o: JSONObject?) {
-        val a = o?.optJSONArray("values")
-        values = settings.mapIndexed { k, s -> if (a != null && k < a.length()) a.optDouble(k, default(s)) else default(s) }
+        val byId = o?.optJSONObject("byId")
+        val a = o?.optJSONArray("values")            // before 0.22.2: by position
+        values = settings.mapIndexed { k, s ->
+            val id = s.optString("id", "$k")
+            when {
+                byId != null && byId.has(id) -> byId.optDouble(id, default(s))
+                byId == null && a != null && k < a.length() -> a.optDouble(k, default(s))
+                else -> default(s)
+            }
+        }
         if (loaded) values.forEachIndexed { k, v -> Native.nativeCtlSetting(k, v) }
     }
 

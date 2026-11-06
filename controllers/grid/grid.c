@@ -25,10 +25,12 @@
 /* ---- settings (the manifest's, in order) ---------------------------------------------------- */
 enum {
     S_COLS, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
-    S_ACROSS, S_UPDOWN, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_LATCH, S_LATCHMODE, S_BAR,
+    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_LATCH, S_LATCHMODE, S_BAR,
     S_SIDE0, S_TURN = S_SIDE0 + 4, S_COUNT
 };
-static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 2, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0};
+static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 2, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0};
+/* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
+static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 enum { TURN_AUTO, TURN_UPRIGHT, TURN_SIDEWAYS };
 
 enum { T_NONE, T_LOUDNESS, T_TONE, T_BEND, T_VOLUME };
@@ -264,11 +266,14 @@ static void apply(Expr* e, int target, float d, int across, const Finger* f, flo
     }
     case T_TONE: e->slide = clampf(0.5f + 0.5f * w, 0, 1); break;
     case T_BEND: {
+        float amount = clampf((absf(v) - 0.08f) / 0.92f, 0, 1);
+        int r = (int)set_[S_BEND_RANGE];
+        float range = BEND_RANGES[r < 0 || r > 6 ? 0 : r];
+        if (range > 0) { *semis += (v >= 0 ? range : -range) * amount; break; }
         /* Toward the note you drag to: across, the next square or the one before (unflipped the
            next is to the left); up and down, the row above or below. */
         int step = !across ? (flipped_y() ? -cols : cols) : mirrored() ? -1 : 1;
         int to = note_of(f->n + (v >= 0 ? step : -step));
-        float amount = clampf((absf(v) - 0.08f) / 0.92f, 0, 1);
         *semis += (float)(to - f->note) * amount;
         break;
     }
@@ -285,6 +290,14 @@ static Expr expression(const Finger* f) {
     apply(&e, (int)set_[S_ACROSS], (f->sx - f->x0) / cell, 1, f, &semis);
     apply(&e, (int)set_[S_UPDOWN], (f->y0 - f->sy) / cell, 0, f, &semis);
     semis += side_bend;
+    /* Snap the bend onto semitones, as the gyro's does: the middle of each semitone holds the note
+       and the move to the next is squeezed toward the edges (all of it, at full snap). Not the
+       vibrato, added after. */
+    float g = 1 - clampf((float)set_[S_BEND_SNAP] / 100.0f, 0, 1);
+    if (g < 0.995f && semis != 0) {
+        float base = floorf_(semis), t = semis - base;
+        semis = base + (g < 0.005f ? (t < 0.5f ? 0 : 1) : clampf((t - (1 - g) / 2) / g, 0, 1));
+    }
     e.slide = clampf(e.slide + side_tone, 0, 1);
     int vi = (int)set_[S_VIBRATO];
     float depth = VIBRATO_DEPTH[vi < 0 || vi > 3 ? 0 : vi];

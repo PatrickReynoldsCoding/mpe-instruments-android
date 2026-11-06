@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "name": "Grid",
   "description": "Square keys, upright: the notes climb row by row; drag to bend toward the next, wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -136,6 +136,30 @@
         "Volume"
       ],
       "default": 2
+    },
+    {
+      "id": "bendRange",
+      "name": "Bend range",
+      "type": "choice",
+      "options": [
+        "Next note",
+        "±1",
+        "±2",
+        "±3",
+        "±5",
+        "±7",
+        "±12"
+      ],
+      "default": 0
+    },
+    {
+      "id": "bendSnap",
+      "name": "Bend snap (%)",
+      "type": "number",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 0
     },
     {
       "id": "vibrato",
