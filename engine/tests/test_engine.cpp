@@ -14,12 +14,11 @@ static double declaredNum(const InstrumentInfo& i, const char* key, int which, d
 }
 
 int main() {
-    int n = 0;
-    const InstrumentInfo* all = instruments(n);
+    const int n = instrumentCount();
     CHECK(n >= 10, "registry lists the instruments (%d)", n);
 
     for (int idx = 0; idx < n; idx++) {
-        const InstrumentInfo& info = all[idx];
+        const InstrumentInfo& info = instrumentAt(idx);
         const bool pitched = std::strcmp(info.meta("pitched"), "no") != 0;
         const double lo = declaredNum(info, "range", 0, 130, 520), hi = declaredNum(info, "range", 1, 130, 520);
         const double winLo = declaredNum(info, "window", 0, 0.6, 1.4), winHi = declaredNum(info, "window", 1, 0.6, 1.4);
@@ -29,25 +28,25 @@ int main() {
         const int note = int(std::lround(69 + 12 * std::log2(mid / 440.0)));
         const double want = midiHz(note);
 
-        Rig r(info.id);
+        Rig r(info.id.c_str());
         r.noteOn(1, note, 90);
         r.press(1, 90); r.slide(1, 64);
         auto held = r.run(1.5);
         r.noteOff(1, note);
         auto tail = r.run(ringout + 0.5);
 
-        CHECK(finite(held) && finite(tail), "%s: output is finite", info.id);
-        CHECK(peak(held) <= 1.0f, "%s: no clipping (peak %.2f)", info.id, peak(held));
+        CHECK(finite(held) && finite(tail), "%s: output is finite", info.id.c_str());
+        CHECK(peak(held) <= 1.0f, "%s: no clipping (peak %.2f)", info.id.c_str(), peak(held));
         double lvl = rms(held, size_t(winLo * kSr), size_t(winHi * kSr));
-        CHECK(lvl > 0.005, "%s: audible while held (rms %.4f)", info.id, lvl);
+        CHECK(lvl > 0.005, "%s: audible while held (rms %.4f)", info.id.c_str(), lvl);
         CHECK(rms(tail, tail.size() - size_t(0.3 * kSr), tail.size()) < std::max(0.005, 0.05 * lvl),
-              "%s: stops after release", info.id);
+              "%s: stops after release", info.id.c_str());
         int freedAfter = 0;        // a slow release is fine, a voice that never frees is not
         for (; r.engine.activeVoices() > 0 && freedAfter < 20; freedAfter++) r.run(1.0);
-        CHECK(r.engine.activeVoices() == 0, "%s: voice is freed after it has decayed (+%d s)", info.id, freedAfter);
+        CHECK(r.engine.activeVoices() == 0, "%s: voice is freed after it has decayed (+%d s)", info.id.c_str(), freedAfter);
         if (pitched && lvl > 0.005) {
             double c = centsOff(held, size_t(winLo * kSr), size_t(winHi * kSr), want);
-            CHECK(std::fabs(c) <= 30, "%s: note %d in tune (%+.0f cents)", info.id, note, c);
+            CHECK(std::fabs(c) <= 30, "%s: note %d in tune (%+.0f cents)", info.id.c_str(), note, c);
         }
     }
 

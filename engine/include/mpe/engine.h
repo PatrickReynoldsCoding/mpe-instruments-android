@@ -8,7 +8,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 #include "mpe/clean.h"
 #include "mpe/midi.h"
@@ -19,18 +21,25 @@ class dsp;   // Faust
 
 namespace mpe {
 
-// One compiled-in instrument. The table is generated from instruments/<group>/<name>.dsp.
+// One instrument: compiled in (generated from instruments/<group>/<name>.dsp, or from instrument
+// packages), or added while running (an instrument package compiled by libfaust: mpe/faust_loader.h).
 struct InstrumentInfo {
-    const char* id;            // "strings/cello"
-    const char* group;         // "strings"
-    const char* name;          // "Cello"
-    const char* description;
-    dsp* (*create)();
-    const char* (*meta)(const char* key);   // a `declare <key> "<value>"` from the .dsp, or ""
-    dsp* (*createPost)();      // the stage all the voices share (an instrument body), or null
+    std::string id;            // "patrickreynolds/cello" (a package's), or "strings/cello"
+    std::string group;         // "strings"
+    std::string name;          // "Cello"
+    std::string description;
+    std::function<dsp*()> create;
+    std::function<const char*(const char*)> meta;   // a `declare <key> "<value>"` from the .dsp, or ""
+    std::function<dsp*()> createPost;                // the stage all the voices share (an instrument body), or null
+    std::vector<std::string> aliases;                // older ids it is also found by ("strings/cello")
+    std::string version;                             // a package's version, or ""
 };
-const InstrumentInfo* instruments(int& count);
-int findInstrument(const char* id);                 // index, or -1
+// The instruments there are. Only the control thread adds to or reads the table; an entry never
+// moves once added.
+int instrumentCount();
+const InstrumentInfo& instrumentAt(int index);
+int addInstrument(InstrumentInfo info);             // its index
+int findInstrument(const char* id);                 // by id or alias: index, or -1
 
 // How the fingers are turned into notes. Handed to the audio thread whole (setPerformance).
 enum class Layout : int { Single = 0, Split = 1, Layer = 2 };

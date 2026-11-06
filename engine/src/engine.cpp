@@ -156,10 +156,8 @@ bool Engine::pushMidi(const Msg& m) {
 }
 
 bool Engine::setInstrument(int part, int index) {
-    int n = 0;
-    const InstrumentInfo* all = instruments(n);
-    if (part < 0 || part >= kParts || index < 0 || index >= n) return false;
-    InstrumentSet* fresh = new InstrumentSet(index, all[index], sr_);
+    if (part < 0 || part >= kParts || index < 0 || index >= instrumentCount()) return false;
+    InstrumentSet* fresh = new InstrumentSet(index, instrumentAt(index), sr_);
     delete pending_[part].exchange(fresh);  // a still-unclaimed older request is replaced
     current_[part] = index;
     collectRetired();

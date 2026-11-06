@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "id": "patrickreynolds/tonnetz",
+  "version": "1.0.0",
+  "name": "Tonnetz",
+  "description": "A net of notes: a node plays a note, a triangle a chord; slide for smooth chord changes",
+  "author": "Patrick Reynolds",
+  "licence": "MIT",
+  "needs": { "fingers": 5, "touchSize": false },
+  "orientation": "landscape",
+  "parts": ["Main"],
+  "arp": "app",
+  "settings": [
+    { "id": "key", "name": "Key", "type": "choice", "options": ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"], "default": 0 },
+    { "id": "octave", "name": "Octave", "type": "number", "min": -3, "max": 3, "step": 1, "default": 0 },
+    { "id": "size", "name": "Size", "type": "number", "min": 4, "max": 12, "step": 1, "default": 7 },
+    { "id": "chords", "name": "Chords", "type": "choice", "options": ["Triads", "Sevenths"], "default": 0 },
+    { "id": "bass", "name": "Bass", "type": "switch", "default": false },
+    { "id": "strum", "name": "Strum", "type": "choice", "options": ["Off", "Fast", "Slow", "Harp"], "default": 0 },
+    { "id": "labels", "name": "Labels", "type": "choice", "options": ["Notes and chords", "Notes", "None"], "default": 0 },
+    { "id": "litKey", "name": "Light the key's chords", "type": "switch", "default": true },
+    { "id": "trails", "name": "Trails", "type": "switch", "default": true }
+  ]
+}

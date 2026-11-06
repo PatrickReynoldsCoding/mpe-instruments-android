@@ -45,6 +45,9 @@ android {
         }
     }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
+    // The controller packages that come with the app (controllers/, built to WebAssembly): the same
+    // .odoc files a computer MESH plays. Built by controllers/build.sh, which needs clang.
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/controllers"))
     buildFeatures { prefab = true; compose = true; buildConfig = true }          // Oboe ships as a prefab package
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -61,3 +64,16 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material:material-icons-core")
 }
+
+val buildControllers by tasks.registering(Exec::class) {
+    val src = rootProject.file("controllers")
+    inputs.dir(src).withPropertyName("controllers")
+    outputs.dir(src.resolve("build"))
+    commandLine(src.resolve("build.sh").path)
+}
+val controllerAssets by tasks.registering(Copy::class) {
+    dependsOn(buildControllers)
+    from(rootProject.file("controllers/build")) { include("*.odoc") }
+    into(layout.buildDirectory.dir("generated/controllers/controllers"))
+}
+tasks.named("preBuild") { dependsOn(controllerAssets) }

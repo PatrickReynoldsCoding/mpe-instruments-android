@@ -12,8 +12,7 @@ int main(int argc, char** argv) {
     double seconds = argc > 3 ? atof(argv[3]) : 3;
     const bool fx = argc > 4 && std::string(argv[4]) == "fx";          // reverb and delay on
     const int sr = 48000;
-    int n = 0;
-    const mpe::InstrumentInfo* all = mpe::instruments(n);
+    const int n = mpe::instrumentCount();
     printf("%d fingers, %d frames per callback (%.2f ms), %.0f s each, %d Hz%s\n\n", fingers, block, 1000.0 * block / sr, seconds, sr,
            fx ? ", reverb and delay on" : "");
     printf("%-22s %8s %8s\n", "instrument", "avg", "peak");
@@ -35,7 +34,7 @@ int main(int argc, char** argv) {
             t += int64_t(1e9 * block / sr);
         }
         mpe::Stats s = e.stats();
-        printf("%-22s %7.1f%% %7.1f%%%s\n", all[i].id, 100 * s.loadAvg, 100 * s.loadPeak, s.loadPeak > 1 ? "   <-- over real time" : "");
+        printf("%-22s %7.1f%% %7.1f%%%s\n", mpe::instrumentAt(i).id.c_str(), 100 * s.loadAvg, 100 * s.loadPeak, s.loadPeak > 1 ? "   <-- over real time" : "");
     }
     return 0;
 }

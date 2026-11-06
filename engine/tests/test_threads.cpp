@@ -26,7 +26,7 @@ int main() {
     });
     // "control thread": settings and instrument switches
     std::thread control([&] {
-        int n = 0; (void)mpe::instruments(n);
+        const int n = mpe::instrumentCount();
         for (int i = 0; go; i++) {
             r.engine.setVolume(0.5f + 0.1f * (i % 4));
             r.engine.setTranspose(i % 3 - 1);

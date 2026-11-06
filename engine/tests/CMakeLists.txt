@@ -6,3 +6,20 @@ foreach(t test_clean test_engine test_replay test_threads test_perform test_phon
     add_test(NAME ${t} COMMAND ${t} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endif()
 endforeach()
+
+# Packages: needs the instrument packages (made at configure time) and the controllers, built
+# here with clang's WebAssembly target. Without clang, this test is left out.
+find_program(CLANG clang)
+if(MPE_BUILTIN_INSTRUMENTS AND NOT MPE_BUILTIN_INSTRUMENTS STREQUAL "SOURCES" AND CLANG)
+  set(ctl "${CMAKE_CURRENT_SOURCE_DIR}/../../controllers")
+  file(GLOB ctl_sources "${ctl}/*/*.c" "${ctl}/*/controller.json" "${ctl}/include/*.h")
+  add_custom_command(OUTPUT "${ctl}/build/tonnetz.odoc" COMMAND "${ctl}/build.sh" DEPENDS ${ctl_sources} "${ctl}/build.sh"
+                     COMMENT "controllers")
+  add_custom_target(controllers DEPENDS "${ctl}/build/tonnetz.odoc")
+  add_executable(test_packages test_packages.cpp)
+  add_dependencies(test_packages controllers)
+  target_link_libraries(test_packages mpe_engine Threads::Threads)
+  target_compile_definitions(test_packages PRIVATE MPE_TEST_PACKAGES="${MPE_PACKAGES_DIR}"
+                             MPE_TEST_CONTROLLERS="${ctl}/build" MPE_TEST_CACHE="${CMAKE_CURRENT_BINARY_DIR}/cache")
+  add_test(NAME test_packages COMMAND test_packages WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()

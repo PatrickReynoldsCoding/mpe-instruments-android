@@ -96,8 +96,9 @@ data class Option(
     val panel: (@Composable () -> Unit)? = null,
 )
 
-/** The controllers there are: built in for now. */
+/** The controllers there are: built in, then the controller packages that come with the app. */
 object Controllers {
-    val all: List<Controller> get() = listOf(TouchPad, KeyGrid, Tonnetz, ExternalMidi)
+    var packaged: List<PackageController> = emptyList()
+    val all: List<Controller> get() = listOf(TouchPad, KeyGrid, Tonnetz, ExternalMidi) + packaged
     fun byId(id: String?): Controller = all.firstOrNull { it.id == id } ?: TouchPad
 }

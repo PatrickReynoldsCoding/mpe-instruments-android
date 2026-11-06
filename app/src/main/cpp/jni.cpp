@@ -2,6 +2,7 @@
 #include <jni.h>
 #include <algorithm>
 #include <memory>
+#include <string>
 #include "Synth.h"
 
 static Synth& synth() { static Synth s; return s; }
@@ -19,13 +20,14 @@ FN(void, nativeTouch)(JNIEnv*, jobject, jint status, jint d1, jint d2) {
     synth().touchMidi(uint8_t(status), uint8_t(d1), uint8_t(d2));
 }
 
-FN(jint, nativeInstrumentCount)(JNIEnv*, jobject) { int n = 0; mpe::instruments(n); return n; }
+FN(jint, nativeInstrumentCount)(JNIEnv*, jobject) { return mpe::instrumentCount(); }
 FN(jstring, nativeInstrumentField)(JNIEnv* env, jobject, jint index, jint field) {
-    int n = 0;
-    const mpe::InstrumentInfo* all = mpe::instruments(n);
-    if (index < 0 || index >= n) return env->NewStringUTF("");
-    const mpe::InstrumentInfo& i = all[index];
-    const char* v = field == 0 ? i.id : field == 1 ? i.group : field == 2 ? i.name : field == 3 ? i.description
+    if (index < 0 || index >= mpe::instrumentCount()) return env->NewStringUTF("");
+    const mpe::InstrumentInfo& i = mpe::instrumentAt(index);
+    // field 0, the id: the app still knows instruments by their ids from before packages
+    // ("winds/flute"), which a package keeps as its first alias.
+    const char* v = field == 0 ? (i.aliases.empty() ? i.id : i.aliases[0]).c_str() : field == 1 ? i.group.c_str()
+                  : field == 2 ? i.name.c_str() : field == 3 ? i.description.c_str()
                   : i.meta("range");                 // field 4: "low high" in Hz, or ""
     return env->NewStringUTF(v ? v : "");
 }
@@ -151,4 +153,48 @@ FN(jboolean, nativeCaptureSave)(JNIEnv* env, jobject, jstring path) {
     bool ok = synth().captureSave(p);
     env->ReleaseStringUTFChars(path, p);
     return ok;
+}
+
+// ---- controller packages (.odoc) -------------------------------------------------------------
+// One at a time: the one on screen. Its notes go in as the touch pad's do. UI thread only.
+#include "mpe/controller.h"
+
+static std::unique_ptr<mpe::ControllerHost>& ctl() { static std::unique_ptr<mpe::ControllerHost> h; return h; }
+static std::string& ctlError() { static std::string e; return e; }
+
+FN(jboolean, nativeCtlLoad)(JNIEnv* env, jobject, jbyteArray bytes) {
+    jsize n = env->GetArrayLength(bytes);
+    std::string data(size_t(n), '\0');
+    env->GetByteArrayRegion(bytes, 0, n, reinterpret_cast<jbyte*>(&data[0]));
+    if (ctl()) ctl()->stop();
+    ctl().reset();
+    auto pkg = mpe::Package::fromBytes(data.data(), data.size(), &ctlError());
+    if (!pkg) return false;
+    auto host = std::make_unique<mpe::ControllerHost>([](const uint8_t* m, int len) {
+        synth().touchMidi(m[0], len > 1 ? m[1] : 0, len > 2 ? m[2] : 0);
+    });
+    if (!host->load(*pkg, &ctlError())) return false;
+    ctl() = std::move(host);
+    return true;
+}
+FN(jstring, nativeCtlError)(JNIEnv* env, jobject) {
+    return env->NewStringUTF((ctl() && !ctl()->lastError().empty() ? ctl()->lastError() : ctlError()).c_str());
+}
+FN(void, nativeCtlUnload)(JNIEnv*, jobject) { if (ctl()) ctl()->stop(); ctl().reset(); }
+FN(void, nativeCtlInit)(JNIEnv*, jobject, jfloat w, jfloat h, jint flags) { if (ctl()) ctl()->init(w, h, flags); }
+FN(void, nativeCtlInstrument)(JNIEnv*, jobject, jint part, jfloat center) { if (ctl()) ctl()->instrument(part, center); }
+FN(void, nativeCtlTouch)(JNIEnv*, jobject, jint id, jint phase, jfloat x, jfloat y, jfloat size, jfloat force) {
+    if (ctl()) ctl()->touch(id, mpe::ControllerHost::Phase(phase), x, y, size, force);
+}
+FN(void, nativeCtlSetting)(JNIEnv*, jobject, jint index, jdouble value) { if (ctl()) ctl()->setting(index, value); }
+FN(void, nativeCtlStop)(JNIEnv*, jobject) { if (ctl()) ctl()->stop(); }
+// A frame: time moves on; the draw list if it changed, else null.
+FN(jbyteArray, nativeCtlTick)(JNIEnv* env, jobject) {
+    if (!ctl()) return nullptr;
+    ctl()->tick();
+    if (!ctl()->takeDirty()) return nullptr;
+    const auto& d = ctl()->drawList();
+    jbyteArray out = env->NewByteArray(jsize(d.size()));
+    env->SetByteArrayRegion(out, 0, jsize(d.size()), reinterpret_cast<const jbyte*>(d.data()));
+    return out;
 }

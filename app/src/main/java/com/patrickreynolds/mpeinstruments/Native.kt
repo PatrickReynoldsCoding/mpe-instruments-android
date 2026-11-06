@@ -14,6 +14,20 @@ object Native {
     /** One MIDI message from the on-screen pad (UI thread only). */
     external fun nativeTouch(status: Int, d1: Int, d2: Int)
 
+    // A controller package (.odoc) running in the engine (wasm3): one at a time, UI thread only.
+    external fun nativeCtlLoad(bytes: ByteArray): Boolean
+    external fun nativeCtlError(): String
+    external fun nativeCtlUnload()
+    /** Its surface in dp; flags 1 = e-ink. */
+    external fun nativeCtlInit(width: Float, height: Float, flags: Int)
+    external fun nativeCtlInstrument(part: Int, centerNote: Float)
+    /** phase: 0 down, 1 move, 2 up, 3 cancel; x, y in dp. */
+    external fun nativeCtlTouch(id: Int, phase: Int, x: Float, y: Float, size: Float, force: Float)
+    external fun nativeCtlSetting(index: Int, value: Double)
+    external fun nativeCtlStop()
+    /** A frame: its draw list if it changed (CONTROLLER_FORMAT.md), else null. */
+    external fun nativeCtlTick(): ByteArray?
+
     external fun nativeInstrumentCount(): Int
     /** field: 0 id, 1 group, 2 name, 3 description, 4 range ("low high" in Hz, or "") */
     external fun nativeInstrumentField(index: Int, field: Int): String
