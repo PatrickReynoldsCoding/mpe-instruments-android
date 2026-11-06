@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -106,22 +105,16 @@ private fun sharedOptions(k: Int): List<Option> {
             Column(Modifier.verticalScroll(rememberScrollState())) { PresetLibrary(accent) }
         },
         Option("Sound", AppState.instrument(k)?.name ?: "") {
-            SoundControls(k, accent)
-            LazyColumn {
-                for ((group, list) in AppState.instruments.groupBy { it.group }) {
-                    item { Text(group.uppercase(), color = TextDim, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp)) }
-                    for (i in list) item {
-                        val chosen = i.id == AppState.perf.part(k).instrument
-                        Text(i.name, fontSize = 16.sp, color = if (chosen) accent else Color.Unspecified,
-                             modifier = Modifier.clickable { AppState.updatePart(k) { it.copy(instrument = i.id) } }
-                                 .fillMaxWidth().padding(vertical = 7.dp))
-                    }
-                }
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                SoundControls(k, accent)
+                SoundPicker(k, accent)
             }
         },
         Option("Effects", effectsSummary(part)) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 PartEffects(k, accent)
+                TextButton(onClick = { AppState.resetEffects(k) }) {
+                    Text("As the pack means it (${AppState.instrument(k)?.name ?: "this sound"})", color = accent) }
                 LabeledSlider("Level", part.volume, 0f..1.5f, pct(part.volume), accent = accent) { v ->
                     AppState.updatePart(k) { it.copy(volume = v) } }
                 Text(if (two) "Reverb (both sounds)" else "Reverb", fontSize = 15.sp, fontWeight = FontWeight.SemiBold,

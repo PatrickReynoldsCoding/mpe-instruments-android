@@ -69,6 +69,6 @@ data class Option(
 
 /** The controllers there are: built in for now. */
 object Controllers {
-    val all: List<Controller> get() = listOf(TouchPad, ExternalMidi)
+    val all: List<Controller> get() = listOf(TouchPad, Tonnetz, ExternalMidi)
     fun byId(id: String?): Controller = all.firstOrNull { it.id == id } ?: TouchPad
 }

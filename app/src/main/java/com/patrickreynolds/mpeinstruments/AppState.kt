@@ -102,6 +102,7 @@ object AppState {
         appContext = context.applicationContext
         prefs = appContext.getSharedPreferences("mpe", Context.MODE_PRIVATE)
         instruments = Native.instruments()
+        com.patrickreynolds.mpeinstruments.packs.Packs.load(appContext, instruments)
         val perfJson = runCatching { prefs.getString("perf", null)?.let { JSONObject(it) } }.getOrNull()
         perf = runCatching { Perf.from(perfJson) }.getOrDefault(Perf())
         // Before presets existed the instrument was saved as an index.
@@ -186,6 +187,21 @@ object AppState {
     }
 
     fun updatePart(i: Int, change: (Part) -> Part) = update { it.withPart(i, change) }
+
+    /**
+     * Play instrument [id] on part [k], with the effects its pack means it to be heard with (the
+     * room too, unless the other part is sounding and keeps it).
+     */
+    fun chooseInstrument(k: Int, id: String) {
+        val d = com.patrickreynolds.mpeinstruments.packs.Packs.defaultsFor(id)
+        update { p ->
+            val q = p.withPart(k) { d.applyTo(it, id) }
+            if (twoParts && k == 1) q else q.copy(reverbSize = d.reverbSize, reverbDamp = d.reverbDamp)
+        }
+    }
+
+    /** Part [k]'s effects back to its pack's, for its instrument. */
+    fun resetEffects(k: Int) = chooseInstrument(k, perf.part(k).instrument)
 
     fun changeVolume(v: Float) { volume = v; Native.nativeSetVolume(v); prefs.edit().putFloat("volume", v).apply() }
 

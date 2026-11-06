@@ -32,6 +32,7 @@ import com.patrickreynolds.mpeinstruments.AppState
 import com.patrickreynolds.mpeinstruments.DELAY_TIMES
 import com.patrickreynolds.mpeinstruments.NOTE_NAMES
 import com.patrickreynolds.mpeinstruments.SCALES
+import com.patrickreynolds.mpeinstruments.packs.Packs
 import kotlin.math.roundToInt
 
 /** Play or arpeggiate, and the arp's settings: the touch pad's, for one pad. */
@@ -166,4 +167,33 @@ fun ReleaseSlider(k: Int, c: Color) {
         val s = v * v * RELEASE_MAX
         AppState.updatePart(k) { it.copy(release = if (s < 0.02f) 0f else s) }
     }
+}
+
+/**
+ * Every sound of every pack, at a glance: a row of chips for each of the pack's groups, so none
+ * is hidden below the fold. Picking one gives part [k] that instrument with its pack's effects.
+ */
+@Composable
+fun SoundPicker(k: Int, accent: Color, picked: () -> Unit = {}) {
+    val chosen = AppState.perf.part(k).instrument
+    for (pack in Packs.all) {
+        if (Packs.all.size > 1) Text(pack.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+        for (g in pack.groups) {
+            Text(g.name.uppercase(), color = TextDim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+            Chips(g.instruments.map { it.name }, g.instruments.indexOfFirst { it.id == chosen }, accent) { i ->
+                AppState.chooseInstrument(k, g.instruments[i].id); picked()
+            }
+        }
+    }
+    Text("A sound comes with its pack's effects, as it is meant to be heard: change them under Effects.",
+         color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+}
+
+/** The instrument on part [k]: its pack and group, and what it is. */
+@Composable
+fun SoundDescription(k: Int) {
+    val inst = AppState.instrument(k) ?: return
+    val pack = Packs.packOf(inst.id)
+    Text(inst.description, color = TextDim, fontSize = 12.sp)
+    if (pack != null) Text("${pack.name} · ${Packs.groupOf(inst.id)?.name ?: ""}", color = TextDim, fontSize = 11.sp)
 }

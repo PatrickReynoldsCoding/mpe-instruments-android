@@ -119,8 +119,8 @@ private fun ControllerCard(open: () -> Unit) {
             }
             Column(Modifier.align(Alignment.CenterStart).padding(20.dp)) {
                 Text(c.name, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-                Text(if (pad) "Play with your fingers, full screen"
-                     else MidiConnector.connectedName.ifEmpty { "Nothing connected yet" }, color = TextDim, fontSize = 13.sp)
+                Text(if (c === com.patrickreynolds.mpeinstruments.controllers.ExternalMidi) MidiConnector.connectedName.ifEmpty { "Nothing connected yet" }
+                     else if (pad) "Play with your fingers, full screen" else c.description, color = TextDim, fontSize = 13.sp, maxLines = 2)
                 Spacer(Modifier.height(10.dp))
                 Button(onClick = open, colors = ButtonDefaults.buttonColors(containerColor = PartColors[0], contentColor = Ink)) {
                     Text("Play")
@@ -133,29 +133,24 @@ private fun ControllerCard(open: () -> Unit) {
 /** A part's name, when there are two: the split's ("Left", "Right"), or "Main" and "Layer". */
 fun partLabel(k: Int) = if (!AppState.twoParts) "" else (AppState.controller.splitNames ?: listOf("Main", "Layer"))[k]
 
-/** Library: your presets and the built-in ones, and the sounds there are. */
+/** Library: your presets and the built-in ones, the instrument packs and their sounds, the controllers. */
 @Composable
 fun LibraryScreen() {
     Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 10.dp)) {
         SectionCard("Presets") { PresetLibrary(PartColors[0]) }
-        SectionCard("Sounds") {
-            Text("The instruments there are. Pick one for what you play on the rail's Sound, or here for the " +
-                 (if (AppState.twoParts) "${partLabel(AppState.part).lowercase()} part." else "sound in use."),
-                 color = TextDim, fontSize = 12.sp)
-            val k = AppState.part
-            for ((group, list) in AppState.instruments.groupBy { it.group }) {
-                Text(group.uppercase(), color = TextDim, fontSize = 12.sp, letterSpacing = 1.2.sp,
-                     modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
-                for (i in list) {
-                    val chosen = i.id == AppState.perf.part(k).instrument
-                    Column(Modifier.fillMaxWidth().clickable { AppState.updatePart(k) { it.copy(instrument = i.id) } }
-                               .padding(vertical = 8.dp)) {
-                        Text(i.name, fontSize = 17.sp, color = if (chosen) PartColors[k] else Color.Unspecified,
-                             fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal)
-                        Text(i.description, color = TextDim, fontSize = 13.sp)
-                    }
-                }
+        for (pack in com.patrickreynolds.mpeinstruments.packs.Packs.all) SectionCard(pack.name) {
+            Text(pack.description, color = TextDim, fontSize = 12.sp)
+            Text("Pick one for " + (if (AppState.twoParts) "the ${partLabel(AppState.part).lowercase()} sound." else "the sound in use."),
+                 color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            SoundPicker(AppState.part, PartColors[AppState.part])
+        }
+        SectionCard("Controllers") {
+            for (c in Controllers.all) {
+                Text(c.name, fontSize = 16.sp, modifier = Modifier.padding(top = 6.dp))
+                Text(c.description, color = TextDim, fontSize = 12.sp)
             }
+            Text("Built in. Choose one on the Play tab or at the top of the play screen's rail.", color = TextDim, fontSize = 12.sp,
+                 modifier = Modifier.padding(top = 6.dp))
         }
     }
 }
@@ -176,21 +171,8 @@ fun InstrumentRow(part: Int, label: String) {
         Text("Change", color = PartColors[part], fontSize = 13.sp)
     }
     if (open) ModalBottomSheet(onDismissRequest = { open = false }, containerColor = Panel) {
-        LazyColumn(Modifier.padding(bottom = 24.dp)) {
-            val groups = AppState.instruments.groupBy { it.group }
-            for ((group, list) in groups) {
-                item { Text(group.uppercase(), color = TextDim, fontSize = 12.sp, letterSpacing = 1.2.sp,
-                            modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 4.dp)) }
-                for (i in list) item {
-                    val chosen = i.id == inst?.id
-                    Column(Modifier.fillMaxWidth().clickable { AppState.updatePart(part) { it.copy(instrument = i.id) }; open = false }
-                               .padding(horizontal = 20.dp, vertical = 10.dp)) {
-                        Text(i.name, fontSize = 17.sp, color = if (chosen) PartColors[part] else Color.Unspecified,
-                             fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal)
-                        Text(i.description, color = TextDim, fontSize = 13.sp)
-                    }
-                }
-            }
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp).verticalScroll(rememberScrollState())) {
+            SoundPicker(part, PartColors[part]) { open = false }
         }
     }
 }
