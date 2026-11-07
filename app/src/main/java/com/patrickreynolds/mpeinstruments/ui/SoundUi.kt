@@ -196,5 +196,6 @@ fun SoundDescription(k: Int) {
     val inst = AppState.instrument(k) ?: return
     val pack = Packs.packOf(inst.id)
     Text(inst.description, color = TextDim, fontSize = 12.sp)
+    if (inst.legacy) Text("Legacy: an old sketch, not fitted to recordings and not being improved.", color = TextDim, fontSize = 11.sp)
     if (pack != null) Text("${pack.name} · ${Packs.groupOf(inst.id)?.name ?: ""}", color = TextDim, fontSize = 11.sp)
 }

@@ -29,7 +29,8 @@ FN(jstring, nativeInstrumentField)(JNIEnv* env, jobject, jint index, jint field)
     const char* v = field == 0 ? (i.aliases.empty() ? i.id : i.aliases[0]).c_str() : field == 1 ? i.group.c_str()
                   : field == 2 ? i.name.c_str() : field == 3 ? i.description.c_str()
                   : field == 4 ? i.meta("range")     // field 4: "low high" in Hz, or ""
-                  : i.meta("sound");                 // field 5: its own effects, `declare sound "reverb=0.3 ..."`, or ""
+                  : field == 5 ? i.meta("sound")     // field 5: its own effects, `declare sound "reverb=0.3 ..."`, or ""
+                  : i.meta("status");                // field 6: "legacy" for an old sketch, or ""
     return env->NewStringUTF(v ? v : "");
 }
 

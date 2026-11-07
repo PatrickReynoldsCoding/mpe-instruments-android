@@ -149,3 +149,23 @@ every system that compiles it.
    `id`, `version` and `tags` are still taken from file names and folders.
 4. Presets store `id@version`; old ids are read through the aliases (the engine already finds
    instruments by alias).
+
+## Room to grow
+
+Where the best plug-ins go further than version 1 does, and how each would be added without
+breaking an instrument that does not use it. Nothing here is built; the aim is only that none of it
+needs a new kind of package. Each is an optional `declare` (and manifest field) and, when it needs
+the host to send something new, a new contract version (`mpe-voice/2`) that an instrument names; a
+host plays older instruments as before.
+
+| later option | how it would fit |
+| --- | --- |
+| **Stereo voices** (the piano's key-by-key pan; stereo samples) | a voice may have 2 outputs and `post` 2 inputs; `channels` already says 1 or 2. The engine and the computer host must keep left and right apart until `post`. |
+| **Pedals** (sustain, half, sostenuto, una corda) | new controls in the contract (`pedal_sustain`, ...), from CC 64/66/67 or a controller; an instrument that ignores them is unchanged. Today the piano uses a firm press as the pedal for one note. |
+| **Sympathetic resonance, mechanical noise, round-robin** | inside the instrument: `post` and the voice. They need only the pedal controls and the host's all-voices view. |
+| **Articulations and keyswitches** (legato, staccato, pizzicato, tremolo) | a declared list of articulations plus one control that chooses between them; the host shows them and maps keyswitches. |
+| **Microphone positions** (close, player, room) | a few knobs of the instrument (the format already has knobs) feeding a stereo `post`. |
+| **Tuning** (Scala files, temperaments) | host-side, as pitch already is; an instrument may declare its own stretch. |
+| **Modulation and macros** (envelopes, LFOs, a mod matrix) | instrument knobs plus a declared "macro" role the host can map to a controller. |
+| **Quality labels** | `status` (`current`, `legacy`) is in the manifest now; a legacy instrument still plays and is marked so in the sound picker. |
+| **Plug-in formats** (VST3, AU, CLAP) | the package is already host-neutral; the plug-in compiles it as odo for computers does. |
