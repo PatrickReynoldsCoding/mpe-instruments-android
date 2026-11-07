@@ -144,6 +144,7 @@ struct App {
         std::error_code ec;
         fs::create_directories(fs::path(configPath).parent_path(), ec);
         std::ofstream f(configPath + ".tmp");
+        f.precision(17);     // every digit: a strike zone map is a seven-digit number
         f << "{\n  \"controller\": " << quoted(lib.controllers.empty() ? "" : lib.controllers[size_t(controller)]->id())
           << ",\n  \"sound\": " << quoted(lib.instruments.empty() ? "" : lib.instruments[size_t(sound)].pkg->id())
           << ",\n  \"railHidden\": " << (railHidden ? "true" : "false")

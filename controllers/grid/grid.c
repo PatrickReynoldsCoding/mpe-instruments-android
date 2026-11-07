@@ -330,6 +330,9 @@ static Expr expression(const Finger* f) {
     /* Where nothing moves them: a firm press, the tone in the middle, full volume (or Volume's 0.7). */
     Expr e = {0, f->strike, 0.5f, 1};
     if ((int)set_[S_ACROSS] == T_VOLUME || (int)set_[S_UPDOWN] == T_VOLUME) e.volume = 0.7f;
+    /* The strike's level also sets the note's own volume (pp about -9 dB, ff full), so strike
+       zones work on every instrument, even one that ignores how hard it is played (an organ). */
+    e.volume *= 0.15f + 0.85f * f->strike;
     float semis = 0;
     apply(&e, (int)set_[S_ACROSS], (f->sx - f->x0) / cell, 1, f, &semis);
     apply(&e, (int)set_[S_UPDOWN], (f->y0 - f->sy) / cell, 0, f, &semis);
