@@ -25,7 +25,7 @@
 /* ---- settings (the manifest's, in order) ---------------------------------------------------- */
 enum {
     S_COLS, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
-    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_ZONE_EDIT, S_ZONE_BLEND, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS,
+    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_ZONE_EDIT, S_ZONE_BLEND, S_ZONE_RANGE, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS,
     S_LATCH, S_LATCHMODE, S_BAR, S_SIDE0, S_TURN = S_SIDE0 + 5,
     /* hidden: kept by the MESH, set from the zone editor and the Dynamics fader */
     S_ZONE_MAP, S_ZONE_P1, S_DYN = S_ZONE_P1 + 4, S_COUNT
@@ -33,7 +33,7 @@ enum {
 /* Strike zones: a square as 3 x 3 zones (rows top to bottom as on screen), each a starting level
    0..5 (pp p mp mf f ff), kept as one number: zone c is digit c in base 6. */
 #define ZONES_EVEN 6046617.0     /* every zone mf */
-static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 1, 0,
+static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 3, 2, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 1, 0,
                                ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, 1};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
@@ -257,6 +257,18 @@ static int nfingers(void) { int c = 0; for (int k = 0; k < MAX_FINGERS; k++) c +
 /* ---- strike zones ---------------------------------------------------------------------------- */
 static const float LEVEL[6] = {0.25f, 0.4f, 0.55f, 0.7f, 0.85f, 1.0f};
 static const char* LEVEL_NAME[6] = {"pp", "p", "mp", "mf", "f", "ff"};
+/* Strike range: how much quieter pp is than ff, in dB. */
+static const float RANGE_DB[7] = {6, 12, 18, 24, 30, 36, 48};
+static const char* RANGE_NAME[7] = {"6", "12", "18", "24", "30", "36", "48"};
+
+/* The note's own volume for a strike level: ff full, pp the strike range below, the levels
+   between evenly spaced in dB (so mp sounds half way, not just counts half way). */
+static float strike_gain(float level) {
+    int r = (int)set_[S_ZONE_RANGE];
+    float range = RANGE_DB[r < 0 || r > 6 ? 3 : r];
+    float t = clampf((level - LEVEL[0]) / (LEVEL[5] - LEVEL[0]), 0, 1);
+    return expf_(-range * (1 - t) * 0.1151293f);     /* 10^(dB/20): ln 10 / 20 */
+}
 
 static void zones_of(double v, int* z) {
     long long n = (long long)(v + 0.5);
@@ -330,9 +342,9 @@ static Expr expression(const Finger* f) {
     /* Where nothing moves them: a firm press, the tone in the middle, full volume (or Volume's 0.7). */
     Expr e = {0, f->strike, 0.5f, 1};
     if ((int)set_[S_ACROSS] == T_VOLUME || (int)set_[S_UPDOWN] == T_VOLUME) e.volume = 0.7f;
-    /* The strike's level also sets the note's own volume (pp about -9 dB, ff full), so strike
-       zones work on every instrument, even one that ignores how hard it is played (an organ). */
-    e.volume *= 0.15f + 0.85f * f->strike;
+    /* The strike's level also sets the note's own volume (ff full, pp the strike range below), so
+       strike zones work on every instrument, even one that ignores how hard it is played (an organ). */
+    e.volume *= strike_gain(f->strike);
     float semis = 0;
     apply(&e, (int)set_[S_ACROSS], (f->sx - f->x0) / cell, 1, f, &semis);
     apply(&e, (int)set_[S_UPDOWN], (f->y0 - f->sy) / cell, 0, f, &semis);
@@ -635,7 +647,7 @@ static void draw_sides(const Theme* th) {
 /* Opened by the rail's "Edit strike zones"; drawn and touched in surface coordinates (never turned).
    Pick a level, then tap or drag over the zones to paint it; or load a preset; Save, then a slot,
    keeps the zones in one of your own four. */
-enum { K_DONE, K_CELL, K_LEVEL, K_SMOOTH, K_PRESET, K_SLOT, K_SAVE };
+enum { K_DONE, K_CELL, K_LEVEL, K_SMOOTH, K_PRESET, K_SLOT, K_SAVE, K_RANGE };
 typedef struct { float x, y, w, h; int kind, arg; } Hit;
 static Hit hits[40];
 static int nhits, brush = 5, saving, ed_finger = -1;
@@ -675,7 +687,7 @@ static void ed_draw(const Theme* th) {
     chip(px + pw - 94, py + 10, 80, 32, "Done", 1, th, K_DONE, 0);
     float in = 16, cw = pw - 2 * in;
     /* The square, its nine zones. */
-    float E = cw < ph - 300 ? cw : ph - 300;
+    float E = cw < ph - 340 ? cw : ph - 340;
     if (E < 90) E = 90;
     float ex = px + (pw - E) / 2, ey = py + 66, zs = E / 3;
     int z[9];
@@ -694,6 +706,14 @@ static void ed_draw(const Theme* th) {
     for (int l = 0; l < 6; l++) chip(px + in + (float)l * (lw + gap), y, lw, 34, LEVEL_NAME[l], l == brush, th, K_LEVEL, l);
     y += 44;
     chip(px + in, y, cw, 30, set_[S_ZONE_BLEND] != 0 ? "Smooth between zones: on" : "Smooth between zones: off", set_[S_ZONE_BLEND] != 0, th, K_SMOOTH, 0);
+    y += 40;
+    /* The range: how much quieter pp is than ff. (ff is the sound at full: louder still is the
+       sound's own Level.) */
+    mesh_text(px + in, y + 13, 9, ink, MESH_TEXT_BOLD, "Range");
+    mesh_text(px + in, y + 26, 9, mesh_alpha(ink, 0.7f), 0, "dB");
+    float rw = (cw - 64 - 6 * gap) / 7;
+    for (int k = 0; k < 7; k++)
+        chip(px + in + 64 + (float)k * (rw + gap), y, rw, 30, RANGE_NAME[k], (int)set_[S_ZONE_RANGE] == k, th, K_RANGE, k);
     y += 40;
     /* Presets: the built-in ones, then your own four. */
     float pw4 = (cw - 3 * gap) / 4;
@@ -738,6 +758,7 @@ static void ed_touch(int id, int phase, float x, float y) {
             else keep(S_ZONE_MAP, set_[S_ZONE_P1 + h->arg]);
             break;
         case K_SAVE: saving = !saving; break;
+        case K_RANGE: keep(S_ZONE_RANGE, h->arg); break;
         }
         dirty = 1;
         return;
