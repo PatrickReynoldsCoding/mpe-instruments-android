@@ -42,7 +42,8 @@ import kotlin.math.roundToInt
 @Composable
 fun packageOptions(c: PackageController): List<Option> {
     val accent = if (Eink) Color.Black else PartColors[0]
-    return c.settings.mapIndexed { k, s ->
+    // A "hidden" setting is state the controller keeps itself (its editor's), not for the rail.
+    return c.settings.withIndex().filter { !it.value.optBoolean("hidden") }.map { (k, s) ->
         val v = c.values.getOrElse(k) { 0.0 }
         val label = s.optString("name", s.optString("id"))
         when (s.optString("type")) {
@@ -84,6 +85,7 @@ fun PackageSurface(c: PackageController) {
         while (true) {
             withFrameNanos { }
             Native.nativeCtlTick()?.let { list = it }
+            Native.nativeCtlTakeSettings()?.let { a -> for (i in 0 until a.size / 2) c.changedByIt(a[2 * i].toInt(), a[2 * i + 1]) }
         }
     }
     failed?.let { Box(Modifier.fillMaxSize()) { Text("This controller can't run: $it", color = Warn, fontSize = 14.sp, modifier = Modifier.padding(16.dp)) }; return }

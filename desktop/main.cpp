@@ -107,6 +107,7 @@ struct App {
 
     int sound = 0, controller = 0;
     std::vector<double> settings;       // the controller's, by position
+    std::vector<size_t> shown;          // the ones on the rail (not "hidden"), in order
 
     // Remembered between sessions (~/.config/odo/settings.json): each controller's settings by
     // name, the controller and sound in use, the rail and full screen.
@@ -283,6 +284,8 @@ struct App {
         settingsScroll = 0;
         const mpe::Json& s = host->manifest()["settings"];
         const auto& mine = saved[lib.controllers[size_t(k)]->id()];
+        shown.clear();
+        for (size_t i = 0; i < s.size(); i++) if (!s[i]["hidden"].boolean()) shown.push_back(i);
         for (size_t i = 0; i < s.size(); i++) {
             auto it = mine.find(s[i]["id"].str());
             settings.push_back(it != mine.end() ? it->second : s[i]["default"].num());
@@ -347,8 +350,8 @@ struct App {
         if (row == 1) chooseController(controller + dir);
         else if (row == 2) chooseSound(sound + dir);
         else if (host && y >= kSettingsTop && y < float(wh) - kBottom) {
-            size_t i = size_t((y - kSettingsTop + settingsScroll) / settingRow(float(wh)));
-            if (i < settings.size()) changeSetting(i, dir);
+            size_t row = size_t((y - kSettingsTop + settingsScroll) / settingRow(float(wh)));
+            if (row < shown.size()) changeSetting(shown[row], dir);
         }
     }
 
@@ -360,7 +363,7 @@ struct App {
     float settingsScroll = 0;
 
     void scrollSettings(float by, float h) {
-        float rows = float(settings.size()) * settingRow(h), room = h - kBottom - kSettingsTop;
+        float rows = float(shown.size()) * settingRow(h), room = h - kBottom - kSettingsTop;
         settingsScroll = std::clamp(settingsScroll + by, 0.f, std::max(0.f, rows - room));
     }
 
@@ -390,8 +393,8 @@ struct App {
     // each row as tall as fits, down to a compact one.
     static constexpr float kSettingsTop = 3.7f * kRow, kBottom = 84;
     float settingRow(float h) const {
-        if (settings.empty()) return kRow;
-        return std::clamp((h - kBottom - kSettingsTop) / float(settings.size()), 30.f, kRow);
+        if (shown.empty()) return kRow;
+        return std::clamp((h - kBottom - kSettingsTop) / float(shown.size()), 30.f, kRow);
     }
 
     void surfaceTouch(int id, mpe::ControllerHost::Phase ph, float x, float y, float force) {
@@ -501,14 +504,15 @@ struct App {
             float rh = settingRow(h);
             scrollSettings(0, h);                // keep the scroll in range (the window may have grown)
             bool big = rh >= 40;
-            for (size_t i = 0; i < settings.size(); i++) {
-                float y = kSettingsTop + float(i) * rh - settingsScroll;
+            for (size_t row = 0; row < shown.size(); row++) {
+                size_t i = shown[row];
+                float y = kSettingsTop + float(row) * rh - settingsScroll;
                 if (y < kSettingsTop - 1 || y + rh > h - kBottom + 1) continue;   // scrolled out of the rail
                 draw::text(renderer, 12, y + (big ? 19 : 12), big ? 11 : 8, dim, fit(s[i]["name"].str(), big ? 11 : 8));
                 draw::text(renderer, 12, y + (big ? 37 : 26), big ? 13 : 10, text, fit(settingValue(i), big ? 13 : 10));
                 arrows(y, rh);
             }
-            float rows = float(settings.size()) * rh, room = h - kBottom - kSettingsTop;
+            float rows = float(shown.size()) * rh, room = h - kBottom - kSettingsTop;
             if (rows > room) {                   // a scroll bar: how much of the settings shows, and where
                 float bar = room * room / rows, at = kSettingsTop + (room - bar) * settingsScroll / (rows - room);
                 draw::fillRect(renderer, kRail - 4, at, 2, bar, rgba(0x9AA2B480), 1);
@@ -542,7 +546,16 @@ struct App {
             if (!lib.instruments.empty() && lib.instruments[size_t(sound)].index >= 0)
                 host->instrument(0, centerNote(*lib.instruments[size_t(sound)].pkg));
         }
-        if (host) host->tick();
+        if (host) {
+            host->tick();
+            // Settings it changed itself (its editor, a button on its surface): kept as if set here.
+            for (const auto& c : host->takeSettingChanges()) {
+                if (size_t(c.index) >= settings.size()) continue;
+                settings[size_t(c.index)] = c.value;
+                saved[lib.controllers[size_t(controller)]->id()][host->manifest()["settings"][size_t(c.index)]["id"].str()] = c.value;
+                saveConfig();
+            }
+        }
         SDL_SetRenderViewport(renderer, nullptr);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);

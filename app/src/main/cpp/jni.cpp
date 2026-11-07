@@ -188,6 +188,17 @@ FN(void, nativeCtlTouch)(JNIEnv*, jobject, jint id, jint phase, jfloat x, jfloat
 }
 FN(void, nativeCtlSetting)(JNIEnv*, jobject, jint index, jdouble value) { if (ctl()) ctl()->setting(index, value); }
 FN(void, nativeCtlStop)(JNIEnv*, jobject) { if (ctl()) ctl()->stop(); }
+// Settings it changed itself since the last call, as index, value pairs; null if none.
+FN(jdoubleArray, nativeCtlTakeSettings)(JNIEnv* env, jobject) {
+    if (!ctl()) return nullptr;
+    auto changes = ctl()->takeSettingChanges();
+    if (changes.empty()) return nullptr;
+    std::vector<double> flat;
+    for (const auto& c : changes) { flat.push_back(c.index); flat.push_back(c.value); }
+    jdoubleArray out = env->NewDoubleArray(jsize(flat.size()));
+    env->SetDoubleArrayRegion(out, 0, jsize(flat.size()), flat.data());
+    return out;
+}
 // A frame: time moves on; the draw list if it changed, else null.
 FN(jbyteArray, nativeCtlTick)(JNIEnv* env, jobject) {
     if (!ctl()) return nullptr;

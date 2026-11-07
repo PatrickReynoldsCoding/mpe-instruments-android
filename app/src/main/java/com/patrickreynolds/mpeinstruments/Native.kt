@@ -27,6 +27,8 @@ object Native {
     external fun nativeCtlStop()
     /** A frame: its draw list if it changed (CONTROLLER_FORMAT.md), else null. */
     external fun nativeCtlTick(): ByteArray?
+    /** Settings it changed itself (its editor, a button on its surface): index, value pairs, or null. */
+    external fun nativeCtlTakeSettings(): DoubleArray?
 
     external fun nativeInstrumentCount(): Int
     /** field: 0 id, 1 group, 2 name, 3 description, 4 range ("low high" in Hz, or "") */

@@ -67,6 +67,7 @@ Times are milliseconds on the MESH's clock. All but `touch` are optional.
 | `note_off(voice, time)` | ends it |
 | `note_volume(voice, volume, time)` | a note's own volume, 0..1: a fade apart from pressure. Called before `note_on` for the same voice, it is the volume the note starts at (else 1). Optional. |
 | `draw(list)` | replaces what is on screen: a list of shapes |
+| `set_setting(index, value)` | changes one of its own settings (an editor, a button on its surface); the MESH keeps and shows it as if set on the rail |
 | `save(state)` | state to keep between sessions (where the notes were dragged to, say). Not yet built. |
 
 The imports are in module `mesh`. The MESH turns notes into MPE: each voice its own MIDI
@@ -123,7 +124,7 @@ the rest.
 | `orientation` | `landscape`, `portrait`, `upright` (stays put as the device turns) or `any` |
 | `parts` | the sounds it plays, by name: one, or the sections of a split |
 | `arp` | `app` (the MESH's arp applies), `off`, or `own` (it has its own) |
-| `settings` | its options: `choice`, `number`, `switch`. Each MESH shows them its own way, on its rail |
+| `settings` | its options: `choice`, `number`, `switch`. Each MESH shows them its own way, on its rail. `"hidden": true` keeps one off the rail: state the controller sets itself (with `set_setting`) and the MESH remembers |
 
 ## Layouts without code
 

@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "name": "Grid",
   "description": "Square keys, upright: the notes climb row by row; drag to bend toward the next, wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -162,6 +162,18 @@
       "default": 0
     },
     {
+      "id": "zoneEdit",
+      "name": "Edit strike zones",
+      "type": "switch",
+      "default": false
+    },
+    {
+      "id": "zoneBlend",
+      "name": "Smooth between zones",
+      "type": "switch",
+      "default": true
+    },
+    {
       "id": "vibrato",
       "name": "Vibrato",
       "type": "choice",
@@ -278,6 +290,17 @@
       "default": 0
     },
     {
+      "id": "sideDyn",
+      "name": "Dynamics fader",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Left",
+        "Right"
+      ],
+      "default": 1
+    },
+    {
       "id": "turn",
       "name": "Turn",
       "type": "choice",
@@ -287,6 +310,66 @@
         "Sideways"
       ],
       "default": 0
+    },
+    {
+      "id": "zoneMap",
+      "name": "Strike zones",
+      "type": "number",
+      "min": 0,
+      "max": 10077695,
+      "step": 1,
+      "default": 6046617,
+      "hidden": true
+    },
+    {
+      "id": "zonePreset1",
+      "name": "Strike zones 1",
+      "type": "number",
+      "min": 0,
+      "max": 10077695,
+      "step": 1,
+      "default": 6046617,
+      "hidden": true
+    },
+    {
+      "id": "zonePreset2",
+      "name": "Strike zones 2",
+      "type": "number",
+      "min": 0,
+      "max": 10077695,
+      "step": 1,
+      "default": 6046617,
+      "hidden": true
+    },
+    {
+      "id": "zonePreset3",
+      "name": "Strike zones 3",
+      "type": "number",
+      "min": 0,
+      "max": 10077695,
+      "step": 1,
+      "default": 6046617,
+      "hidden": true
+    },
+    {
+      "id": "zonePreset4",
+      "name": "Strike zones 4",
+      "type": "number",
+      "min": 0,
+      "max": 10077695,
+      "step": 1,
+      "default": 6046617,
+      "hidden": true
+    },
+    {
+      "id": "dynamics",
+      "name": "Dynamics",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "step": 0,
+      "default": 1,
+      "hidden": true
     }
   ]
 }

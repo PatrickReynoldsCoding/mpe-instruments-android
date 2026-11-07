@@ -55,6 +55,13 @@ class PackageController(private val bytes: ByteArray, val manifest: JSONObject) 
         return loaded
     }
 
+    /** A setting it changed itself: kept and saved, not sent back to it. */
+    fun changedByIt(index: Int, value: Double) {
+        if (index !in values.indices || values[index] == value) return
+        values = values.mapIndexed { k, v -> if (k == index) value else v }
+        AppState.controllerChanged(this, engine = false)
+    }
+
     fun change(index: Int, value: Double) {
         if (values.getOrNull(index) == value) return
         values = values.mapIndexed { k, v -> if (k == index) value else v }

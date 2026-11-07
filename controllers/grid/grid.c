@@ -25,17 +25,23 @@
 /* ---- settings (the manifest's, in order) ---------------------------------------------------- */
 enum {
     S_COLS, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
-    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_LATCH, S_LATCHMODE, S_BAR,
-    S_SIDE0, S_TURN = S_SIDE0 + 4, S_COUNT
+    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_ZONE_EDIT, S_ZONE_BLEND, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS,
+    S_LATCH, S_LATCHMODE, S_BAR, S_SIDE0, S_TURN = S_SIDE0 + 5,
+    /* hidden: kept by the MESH, set from the zone editor and the Dynamics fader */
+    S_ZONE_MAP, S_ZONE_P1, S_DYN = S_ZONE_P1 + 4, S_COUNT
 };
-static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 2, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0};
+/* Strike zones: a square as 3 x 3 zones (rows top to bottom as on screen), each a starting level
+   0..5 (pp p mp mf f ff), kept as one number: zone c is digit c in base 6. */
+#define ZONES_EVEN 6046617.0     /* every zone mf */
+static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 1, 0,
+                               ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, 1};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 enum { TURN_AUTO, TURN_UPRIGHT, TURN_SIDEWAYS };
 
 enum { T_NONE, T_LOUDNESS, T_TONE, T_BEND, T_VOLUME };
 enum { LATCH_CHORD, LATCH_TAP };
-enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_COUNT };   /* the side controls */
+enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_DYN, C_COUNT };   /* the side controls */
 enum { COL_PLAIN, COL_DEGREES, COL_CHORD, COL_PILLARS, COL_NAMES };
 enum { SIDE_OFF, SIDE_LEFT, SIDE_RIGHT };
 
@@ -224,6 +230,7 @@ static float square_y(int k) { return row_top(floordiv(k, cols)) + gap / 2; }
 typedef struct {
     int used, id, voice, n, note;
     float x0, y0, x, y, sx, sy;   /* where it came down, where it is, and its slow position */
+    float strike;                 /* how loud it started: its strike zone's level */
 } Finger;
 static Finger fingers[MAX_FINGERS];
 /* Notes left sounding after their fingers lifted (latch, or hold), oldest first. */
@@ -247,6 +254,41 @@ static Finger* find(int id) {
 }
 static int nfingers(void) { int c = 0; for (int k = 0; k < MAX_FINGERS; k++) c += fingers[k].used; return c; }
 
+/* ---- strike zones ---------------------------------------------------------------------------- */
+static const float LEVEL[6] = {0.25f, 0.4f, 0.55f, 0.7f, 0.85f, 1.0f};
+static const char* LEVEL_NAME[6] = {"pp", "p", "mp", "mf", "f", "ff"};
+
+static void zones_of(double v, int* z) {
+    long long n = (long long)(v + 0.5);
+    for (int c = 0; c < 9; c++) { z[c] = (int)(n % 6); n /= 6; }
+}
+static double zones_value(const int* z) {
+    double v = 0, m = 1;
+    for (int c = 0; c < 9; c++) { v += (double)(z[c] < 0 ? 0 : z[c] > 5 ? 5 : z[c]) * m; m *= 6; }
+    return v;
+}
+
+/* The level where a square is struck: (u, v) across and down it, as it looks on screen. Smooth:
+   blended between the zones' middles; else the zone it is in. */
+static float strike_level(float u, float v) {
+    int z[9];
+    zones_of(set_[S_ZONE_MAP], z);
+    u = clampf(u, 0, 1); v = clampf(v, 0, 1);
+    if (set_[S_ZONE_BLEND] == 0) {
+        int c = (int)(u * 3), r = (int)(v * 3);
+        if (c > 2) c = 2;
+        if (r > 2) r = 2;
+        return LEVEL[z[r * 3 + c]];
+    }
+    float gx = clampf(u * 3 - 0.5f, 0, 2), gy = clampf(v * 3 - 0.5f, 0, 2);
+    int c0 = (int)gx, r0 = (int)gy;
+    if (c0 > 1) c0 = 1;
+    if (r0 > 1) r0 = 1;
+    float fx = gx - (float)c0, fy = gy - (float)r0;
+    float a = LEVEL[z[r0 * 3 + c0]], b = LEVEL[z[r0 * 3 + c0 + 1]], c = LEVEL[z[(r0 + 1) * 3 + c0]], d = LEVEL[z[(r0 + 1) * 3 + c0 + 1]];
+    return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+}
+
 typedef struct { float pitch, pressure, slide, volume; } Expr;
 
 /* The axes, from how far the finger has moved (slowly) from where it came down; vibrato from the
@@ -257,9 +299,11 @@ static void apply(Expr* e, int target, float d, int across, const Finger* f, flo
     float v = clampf(d, -1, 1), w = clampf(d / REACH, -1, 1);
     switch (target) {
     case T_LOUDNESS: {
-        /* From 0.6: up to full, down to nearly nothing. The volume follows it too, so it works on
-           struck and plucked instruments, which hardly listen to pressure once the note has started. */
-        float level = clampf(0.6f + (w >= 0 ? 0.4f : 0.58f) * w, 0.02f, 1);
+        /* From where it was struck: up to full, down to nearly nothing. The volume follows it too, so
+           it works on struck and plucked instruments, which hardly listen to pressure once the note
+           has started. */
+        float base = f->strike;
+        float level = clampf(base + (w >= 0 ? 1 - base : base - 0.02f) * w, 0.02f, 1);
         e->pressure = level;
         e->volume = clampf(0.4f + level, 0, 1);
         break;
@@ -284,7 +328,7 @@ static void apply(Expr* e, int target, float d, int across, const Finger* f, flo
 
 static Expr expression(const Finger* f) {
     /* Where nothing moves them: a firm press, the tone in the middle, full volume (or Volume's 0.7). */
-    Expr e = {0, 0.75f, 0.5f, 1};
+    Expr e = {0, f->strike, 0.5f, 1};
     if ((int)set_[S_ACROSS] == T_VOLUME || (int)set_[S_UPDOWN] == T_VOLUME) e.volume = 0.7f;
     float semis = 0;
     apply(&e, (int)set_[S_ACROSS], (f->sx - f->x0) / cell, 1, f, &semis);
@@ -298,6 +342,10 @@ static Expr expression(const Finger* f) {
         float base = floorf_(semis), t = semis - base;
         semis = base + (g < 0.005f ? (t < 0.5f ? 0 : 1) : clampf((t - (1 - g) / 2) / g, 0, 1));
     }
+    /* The Dynamics fader: an expression pedal over every note. */
+    float dyn = clampf((float)set_[S_DYN], 0, 1);
+    e.volume *= dyn;
+    e.pressure *= 0.4f + 0.6f * dyn;
     e.slide = clampf(e.slide + side_tone, 0, 1);
     int vi = (int)set_[S_VIBRATO];
     float depth = VIBRATO_DEPTH[vi < 0 || vi > 3 ? 0 : vi];
@@ -359,10 +407,13 @@ static void down(int id, float x, float y) {
     if (!f) return;
     f->used = 1; f->id = id; f->voice = next_voice++; f->n = n; f->note = note_of(n);
     f->x0 = f->x = f->sx = x; f->y0 = f->y = f->sy = y;
+    /* Where in its square it was struck, as the square looks on screen (turned or not). */
+    float side = cell - gap, u = (x - square_x(n)) / side, w = (y - square_y(n)) / side;
+    f->strike = turned ? strike_level(1 - w, u) : strike_level(u, w);
     for (int r = 0; r < MAX_RING; r++) if (ring[r].n == n) ring[r].glow = 0;
     Expr e = expression(f);
-    mesh_note_on(f->voice, 0, e.pitch, e.pressure, e.slide, e.pressure, now);
-    if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);
+    if (e.volume < 1) mesh_note_volume(f->voice, e.volume, now);   /* before: the note starts at it */
+    mesh_note_on(f->voice, 0, e.pitch, e.pressure, e.slide, f->strike, now);
     dirty = 1;
 }
 
@@ -433,6 +484,9 @@ static void side_drag(SideTouch* s, float at) {
     } else if (s->control == C_TONE) {
         side_tone = clampf(at - 0.5f, -0.5f, 0.5f);
         resend_all();
+    } else if (s->control == C_DYN) {
+        set_[S_DYN] = at;          /* stays where it is left, as a pedal does */
+        resend_all();
     }
     dirty = 1;
 }
@@ -480,8 +534,13 @@ static void side_up(SideTouch* s) {
     if (s->control == C_BAR) { s->id = 0; dirty = 1; return; }
     touched[s->control]--;
     if (s->control == C_HOLD) hold(0);
-    else if (s->control == C_LATCH) set_latch(!latch_on);
+    else if (s->control == C_LATCH) {
+        set_latch(!latch_on);
+        set_[S_LATCH] = latch_on;
+        mesh_set_setting(S_LATCH, latch_on);   /* the rail shows it */
+    }
     else if (s->control == C_BEND) { side_bend = 0; resend_all(); }
+    else if (s->control == C_DYN) mesh_set_setting(S_DYN, set_[S_DYN]);   /* remembered */
     s->id = 0;
     dirty = 1;
 }
@@ -560,7 +619,125 @@ static void draw_sides(const Theme* th) {
             put_int(v, roundi(side_tone * 200), 1);
             draw_slider(r, "Tone", v, 0.5f + side_tone, 3, th, ink);
             break;
+        case C_DYN:
+            put(put_int(v, roundi((float)set_[S_DYN] * 100), 0), "%");
+            draw_slider(r, "Dynamics", v, (float)set_[S_DYN], 5, th, ink);
+            break;
         }
+    }
+}
+
+
+/* ---- the strike zone editor: a panel over the grid -------------------------------------------- */
+/* Opened by the rail's "Edit strike zones"; drawn and touched in surface coordinates (never turned).
+   Pick a level, then tap or drag over the zones to paint it; or load a preset; Save, then a slot,
+   keeps the zones in one of your own four. */
+enum { K_DONE, K_CELL, K_LEVEL, K_SMOOTH, K_PRESET, K_SLOT, K_SAVE };
+typedef struct { float x, y, w, h; int kind, arg; } Hit;
+static Hit hits[40];
+static int nhits, brush = 5, saving, ed_finger = -1;
+
+static const char* PRESET_NAME[7] = {"Even", "Top loud", "Bottom loud", "Centre loud", "Edges loud", "Left soft", "Right soft"};
+static const signed char PRESETS[7][9] = {
+    {3, 3, 3, 3, 3, 3, 3, 3, 3}, {5, 5, 5, 3, 3, 3, 1, 1, 1}, {1, 1, 1, 3, 3, 3, 5, 5, 5},
+    {1, 2, 1, 2, 5, 2, 1, 2, 1}, {5, 4, 5, 4, 1, 4, 5, 4, 5}, {1, 3, 5, 1, 3, 5, 1, 3, 5}, {5, 3, 1, 5, 3, 1, 5, 3, 1}};
+
+static int editing(void) { return set_[S_ZONE_EDIT] != 0; }
+
+static void hit(float x, float y, float w, float h, int kind, int arg) {
+    if (nhits < 40) { Hit t = {x, y, w, h, kind, arg}; hits[nhits++] = t; }
+}
+
+static void keep(int index, double v) { set_[index] = v; mesh_set_setting(index, v); dirty = 1; }
+
+static void chip(float x, float y, float w, float h, const char* label, int on, const Theme* th, int kind, int arg) {
+    unsigned ink = eink ? BLACK : th->light;
+    mesh_rect(x, y, w, h, 8, on ? (eink ? BLACK : mesh_alpha(ink, 0.85f)) : (eink ? WHITE : th->square), mesh_alpha(ink, on ? 1 : 0.45f), 1.5f);
+    /* As big as fits: at most 11, smaller for a long name in a narrow chip (text runs about a size per letter). */
+    int n = 0;
+    while (label[n]) n++;
+    float size = n ? clampf((w - 8) / (float)n, 7, 11) : 11;
+    mesh_text(x + w / 2, y + h / 2 + size * 0.35f, size, on ? (eink ? WHITE : th->on_light) : ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, label);
+    hit(x, y, w, h, kind, arg);
+}
+
+static void ed_draw(const Theme* th) {
+    nhits = 0;
+    unsigned ink = eink ? BLACK : th->light, panel = eink ? WHITE : th->background;
+    float pw = SW - 24 < 520 ? SW - 24 : 520, ph = SH - 24, px = (SW - pw) / 2, py = 12;
+    mesh_rect(0, 0, SW, SH, 0, eink ? 0xFFFFFFCCu : 0x000000B0u, 0, 0);
+    mesh_rect(px, py, pw, ph, 16, panel, mesh_alpha(ink, 0.6f), 1.5f);
+    mesh_text(px + 18, py + 30, 16, ink, MESH_TEXT_BOLD, "Strike zones");
+    mesh_text(px + 18, py + 50, 10, mesh_alpha(ink, 0.7f), 0, "Where a square is struck sets how loud its note starts.");
+    chip(px + pw - 94, py + 10, 80, 32, "Done", 1, th, K_DONE, 0);
+    float in = 16, cw = pw - 2 * in;
+    /* The square, its nine zones. */
+    float E = cw < ph - 300 ? cw : ph - 300;
+    if (E < 90) E = 90;
+    float ex = px + (pw - E) / 2, ey = py + 66, zs = E / 3;
+    int z[9];
+    zones_of(set_[S_ZONE_MAP], z);
+    for (int c = 0; c < 9; c++) {
+        float x = ex + (float)(c % 3) * zs, y = ey + (float)(c / 3) * zs;
+        float a = LEVEL[z[c]];
+        mesh_rect(x + 2, y + 2, zs - 4, zs - 4, 8, eink ? mesh_alpha(BLACK, a * 0.6f) : mesh_alpha(th->light, 0.12f + 0.75f * a), mesh_alpha(ink, 0.5f), 1);
+        mesh_text(x + zs / 2, y + zs / 2 + 7, zs > 80 ? 20 : 13, a > 0.6f && !eink ? th->on_light : ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, LEVEL_NAME[z[c]]);
+        hit(x, y, zs, zs, K_CELL, c);
+    }
+    mesh_rect(ex, ey, E, E, 10, 0, ink, 2);
+    float y = ey + E + 14, gap = 6;
+    /* The level to paint with. */
+    float lw = (cw - 5 * gap) / 6;
+    for (int l = 0; l < 6; l++) chip(px + in + (float)l * (lw + gap), y, lw, 34, LEVEL_NAME[l], l == brush, th, K_LEVEL, l);
+    y += 44;
+    chip(px + in, y, cw, 30, set_[S_ZONE_BLEND] != 0 ? "Smooth between zones: on" : "Smooth between zones: off", set_[S_ZONE_BLEND] != 0, th, K_SMOOTH, 0);
+    y += 40;
+    /* Presets: the built-in ones, then your own four. */
+    float pw4 = (cw - 3 * gap) / 4;
+    for (int k = 0; k < 7; k++) {
+        int row = k / 4, col = k % 4;
+        chip(px + in + (float)col * (pw4 + gap), y + (float)row * 36, pw4, 30, PRESET_NAME[k], 0, th, K_PRESET, k);
+    }
+    y += 76;
+    mesh_text(px + in, y + 20, 11, ink, MESH_TEXT_BOLD, saving ? "Save to:" : "Yours:");
+    float sw = (cw - 64 - 4 * gap) / 5;
+    for (int k = 0; k < 4; k++) {
+        char name[4] = {(char)('1' + k), 0};
+        chip(px + in + 64 + (float)k * (sw + gap), y, sw, 30, name, 0, th, K_SLOT, k);
+    }
+    chip(px + in + 64 + 4 * (sw + gap), y, sw, 30, "Save", saving, th, K_SAVE, 0);
+}
+
+/* A touch on the editor: tap the buttons; tap or drag over the zones to paint them. */
+static void ed_touch(int id, int phase, float x, float y) {
+    if (phase != MESH_DOWN && id != ed_finger) return;
+    if (phase == MESH_UP || phase == MESH_CANCEL) { ed_finger = -1; return; }
+    if (phase == MESH_DOWN) ed_finger = id;
+    for (int k = 0; k < nhits; k++) {
+        Hit* h = &hits[k];
+        if (x < h->x || x > h->x + h->w || y < h->y || y > h->y + h->h) continue;
+        if (phase == MESH_MOVE && h->kind != K_CELL) return;
+        int z[9];
+        zones_of(set_[S_ZONE_MAP], z);
+        switch (h->kind) {
+        case K_DONE: saving = 0; keep(S_ZONE_EDIT, 0); break;
+        case K_CELL: if (z[h->arg] != brush) { z[h->arg] = brush; keep(S_ZONE_MAP, zones_value(z)); } break;
+        case K_LEVEL: brush = h->arg; break;
+        case K_SMOOTH: keep(S_ZONE_BLEND, set_[S_ZONE_BLEND] != 0 ? 0 : 1); break;
+        case K_PRESET: {
+            int pz[9];
+            for (int c = 0; c < 9; c++) pz[c] = PRESETS[h->arg][c];
+            keep(S_ZONE_MAP, zones_value(pz));
+            break;
+        }
+        case K_SLOT:
+            if (saving) { keep(S_ZONE_P1 + h->arg, set_[S_ZONE_MAP]); saving = 0; }
+            else keep(S_ZONE_MAP, set_[S_ZONE_P1 + h->arg]);
+            break;
+        case K_SAVE: saving = !saving; break;
+        }
+        dirty = 1;
+        return;
     }
 }
 
@@ -675,6 +852,7 @@ static void draw(void) {
             g_glow(fingers[k].x, fingers[k].y, cell * 0.9f, mesh_alpha(th->hot, 0.5f), mesh_alpha(th->light, 0));
     draw_bar(th);
     draw_sides(th);
+    if (editing()) ed_draw(th);
     mesh_end();
     dirty = 0;
 }
@@ -700,11 +878,14 @@ MESH_EXPORT(instrument) void instrument(int part, float center_note) {
     if (part == 0) { center = center_note; dirty = 1; }
 }
 
+void stop(void);
+
 MESH_EXPORT(setting) void setting(int index, double value) {
     if (index < 0 || index >= S_COUNT) return;
     set_[index] = value;
     if (index == S_LATCH) set_latch(value != 0);
     if (index == S_TURN) turn_to(SW, SH);
+    if (index == S_ZONE_EDIT && value != 0) stop();      /* opening the editor lets go of what plays */
     layout();
     clamp_pos();
 }
@@ -712,6 +893,8 @@ MESH_EXPORT(setting) void setting(int index, double value) {
 MESH_EXPORT(touch) void touch(int id, int phase, float x, float y, float size, float force, double t) {
     (void)size; (void)force;
     now = t;
+    /* The zone editor takes every touch while it is open, on the surface as it is (never turned). */
+    if (editing()) { ed_touch(id, phase, x, y); dirty = 1; return; }
     if (turned) { float ux = y, uy = H - x; x = ux; y = uy; }   /* the touch, as on the upright grid */
     id += 1;    /* 0 marks a free side touch */
     if (phase == MESH_DOWN) {

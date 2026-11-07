@@ -37,6 +37,11 @@ public:
     bool takeDirty() { bool d = dirty_; dirty_ = false; return d; }
     const std::vector<uint8_t>& drawList() const { return draw_; }
 
+    // Settings the controller changed itself (an editor or a button on its surface), oldest first:
+    // the app keeps them as if they had been set on its rail. Taking them empties the list.
+    struct SettingChange { int index; double value; };
+    std::vector<SettingChange> takeSettingChanges() { std::vector<SettingChange> v; v.swap(changes_); return v; }
+
     // The engine reads note-on velocity times this (the Seaboard sends small ones): divide by it.
     void setVelocityScale(float s) { velocityScale_ = s; }
     double nowMs() const;
@@ -48,6 +53,7 @@ public:
     void noteOff(int voice, double t);
     void noteVolume(int voice, float volume, double t);
     void drawFrom(uint32_t ptr, uint32_t len);
+    void settingFrom(int index, double value);
 
 private:
     struct Wasm;
@@ -69,6 +75,7 @@ private:
     Chan ch_[16];
     std::vector<Note> later_;                       // notes it stamped for later (a strum, an arp)
     std::vector<std::pair<int, float>> startVolume_; // note_volume for a voice that hasn't started yet
+    std::vector<SettingChange> changes_;
 };
 
 }  // namespace mpe

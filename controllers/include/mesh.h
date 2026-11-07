@@ -28,6 +28,9 @@ MESH_IMPORT(note_off) void mesh_note_off(int voice, double t);
 /* A held note's own volume, 0..1 (1 when it starts): a fade, apart from pressure. */
 MESH_IMPORT(note_volume) void mesh_note_volume(int voice, float volume, double t);
 MESH_IMPORT(draw) void mesh_draw(const void* list, unsigned len);
+/* Change one of its own settings (by its place in the manifest), as if set on the rail: the MESH
+   keeps it and shows it. For an editor or a button on the surface. */
+MESH_IMPORT(set_setting) void mesh_set_setting(int index, double value);
 
 /* ---- the draw list: 32-bit words, colours 0xRRGGBBAA (alpha 0: none) ------------------------ */
 enum {

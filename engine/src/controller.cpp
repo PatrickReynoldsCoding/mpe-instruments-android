@@ -44,6 +44,11 @@ m3ApiRawFunction(hostNoteVolume) {
     self(_ctx)->noteVolume(voice, volume, t);
     m3ApiSuccess();
 }
+m3ApiRawFunction(hostSetSetting) {
+    m3ApiGetArg(int32_t, index) m3ApiGetArg(double, value)
+    self(_ctx)->settingFrom(index, value);
+    m3ApiSuccess();
+}
 m3ApiRawFunction(hostDraw) {
     m3ApiGetArg(uint32_t, ptr) m3ApiGetArg(uint32_t, len)
     self(_ctx)->drawFrom(ptr, len);
@@ -87,6 +92,7 @@ bool ControllerHost::load(const Package& pkg, std::string* error) {
         {"note_off", "v(iF)", &hostNoteOff},
         {"note_volume", "v(ifF)", &hostNoteVolume},
         {"draw", "v(ii)", &hostDraw},
+        {"set_setting", "v(iF)", &hostSetSetting},
     };
     for (const Link& l : links) {
         r = m3_LinkRawFunctionEx(w->module, "mesh", l.name, l.sig, l.fn, this);
@@ -237,6 +243,11 @@ void ControllerHost::play(const Note& n) {
         send(uint8_t(0x80 | c), uint8_t(ch_[c].note), 64);
         ch_[c] = Chan();
     }
+}
+
+void ControllerHost::settingFrom(int index, double value) {
+    if (index < 0 || size_t(index) >= manifest_["settings"].size()) { error_ = "set_setting: no setting " + std::to_string(index); return; }
+    if (changes_.size() < 256) changes_.push_back({index, value});
 }
 
 void ControllerHost::drawFrom(uint32_t ptr, uint32_t len) {
