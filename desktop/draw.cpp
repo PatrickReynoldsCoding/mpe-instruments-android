@@ -132,9 +132,16 @@ void text(SDL_Renderer* r, float x, float y, float size, Color c, const std::str
     SDL_GetRenderScale(r, &sx, &sy);
     SDL_SetRenderViewport(r, nullptr);
     SDL_SetRenderScale(r, sx * scale, sy * scale);
+    // Kept inside the viewport it was meant for (a side of a split), as the shapes are.
+    if (hasViewport) {
+        SDL_Rect clip{int(std::floor(float(vp.x) / scale)), int(std::floor(float(vp.y) / scale)),
+                      int(std::ceil(float(vp.w) / scale)), int(std::ceil(float(vp.h) / scale))};
+        SDL_SetRenderClipRect(r, &clip);
+    }
     SDL_SetRenderDrawColorFloat(r, c.r, c.g, c.b, c.a);
     SDL_RenderDebugText(r, x / scale, y / scale, s.c_str());
     if (bold) SDL_RenderDebugText(r, x / scale + 0.6f, y / scale, s.c_str());
+    if (hasViewport) SDL_SetRenderClipRect(r, nullptr);
     SDL_SetRenderScale(r, sx, sy);
     if (hasViewport) SDL_SetRenderViewport(r, &vp);
 }

@@ -593,7 +593,21 @@ static void draw_button(SideRect* r, const char* label, const char* value, int o
 
 static void draw_slider(SideRect* r, const char* label, const char* value, float at, int ticks, const Theme* th, unsigned ink) {
     g_rect(r->x, r->y, r->w, r->h, 10, eink ? WHITE : th->square, mesh_alpha(ink, touched[r->control] ? 0.9f : 0.5f), 1.5f);
-    float top = r->y + 46, bot = r->y + r->h - 12;
+    /* Room for the name: across the slider's end when turned (the track starts after it); upright,
+       a name wider than the slider is cut to its first letters. */
+    int n = 0;
+    while (label[n]) n++;
+    float lw = (float)n * 11;
+    char cut[8];
+    if (!turned && lw > r->w - 4) {
+        int keep = (int)((r->w - 4) / 11);
+        if (keep < 3) keep = 3;
+        if (keep > 6) keep = 6;
+        for (int i = 0; i < keep && i < n; i++) cut[i] = label[i];
+        cut[keep < n ? keep : n] = 0;
+        label = cut;
+    }
+    float top = r->y + (turned && lw + 16 > 46 ? lw + 16 : 46), bot = r->y + r->h - 12;
     for (int i = 0; i < ticks; i++) {
         float y = bot - (bot - top) * (float)i / (float)(ticks - 1);
         g_line(r->x + r->w * 0.3f, y, r->x + r->w * 0.7f, y, mesh_alpha(ink, 0.3f), 1);
@@ -603,8 +617,9 @@ static void draw_slider(SideRect* r, const char* label, const char* value, float
     g_rect(r->x + r->w * 0.18f, y - 5, r->w * 0.64f, 10, 5, eink ? BLACK : th->hot, 0, 0);
     /* The name and value at the slider's top end (upright), its right end (turned). */
     if (turned) {
-        g_text_at(x, r->y + 22, 0, -7, 11, ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, label);
-        g_text_at(x, r->y + 22, 0, 7, 9, mesh_alpha(ink, 0.75f), MESH_TEXT_CENTER, value);
+        float at_ = r->y + (lw / 2 + 6 > 22 ? lw / 2 + 6 : 22);
+        g_text_at(x, at_, 0, -7, 11, ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, label);
+        g_text_at(x, at_, 0, 7, 9, mesh_alpha(ink, 0.75f), MESH_TEXT_CENTER, value);
     } else {
         g_text(x, r->y + 15, 11, ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, label);
         g_text(x, r->y + 28, 10, mesh_alpha(ink, 0.75f), MESH_TEXT_CENTER, value);

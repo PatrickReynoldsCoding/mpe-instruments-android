@@ -2,14 +2,17 @@
 // with controller packages (.odoc, run in wasm3) on a touch screen, from the same files as odo
 // on Android. Linux and Windows (SDL3).
 //
-//   odo [--library DIR]... [--controller ID] [--sound ID] [--log-midi] [--no-update] [--version] [--self-update]
+//   odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--no-update]
+//       [--version] [--self-update] [--setting [SIDE:]INDEX=VALUE]...
 //       [--selftest out.bmp [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]
 //
 // Library folders hold .odoi and .odoc files (default: the library folder beside odo, and
 // ~/.local/share/odo/library). It checks GitHub for a newer odo when it opens (--no-update: not);
 // the update row at the bottom of the rail installs it. The rail on
-// the left picks the sound, the controller and its settings; the rest of the window is the
-// controller. Keys: Tab hides the rail, F11 full screen, Esc quits.
+// the left picks the split, then for each side its controller, sound and settings; the rest of
+// the window is the controllers: whole, or split side by side, above and below, in three or in
+// four, each side playing its own sound. (--controller and --sound repeat: the first is the
+// first side's, the next the second's.) Keys: Tab hides the rail, F11 full screen, Esc quits.
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <algorithm>
@@ -93,6 +96,24 @@ float centerNote(const mpe::Package& p) {
     return float(69 + 12 * std::log2(std::sqrt(lo * hi) / 440));
 }
 
+
+// ---- splits ------------------------------------------------------------------------------------
+
+// The ways the window can be shared: each side its own controller playing its own sound (a part
+// of the engine), up to four.
+struct Split { const char* name; int sides; int cols; const char* side[4]; };
+const Split kSplits[] = {
+    {"Whole", 1, 1, {"Whole"}},
+    {"Side by side", 2, 2, {"Left", "Right"}},
+    {"Above and below", 2, 1, {"Top", "Bottom"}},
+    {"Three side by side", 3, 3, {"Left", "Middle", "Right"}},
+    {"Three above each other", 3, 1, {"Top", "Middle", "Bottom"}},
+    {"Four", 4, 2, {"Top left", "Top right", "Bottom left", "Bottom right"}},
+};
+constexpr int kSplitCount = int(sizeof kSplits / sizeof kSplits[0]);
+constexpr int kSides = 4;
+constexpr float kGap = 6;              // between two sides
+
 // ---- the app -----------------------------------------------------------------------------------
 
 struct App {
@@ -101,20 +122,32 @@ struct App {
     SDL_AudioStream* audio = nullptr;
     std::unique_ptr<mpe::Engine> engine;
     std::unique_ptr<mpe::MidiInput> midi;
-    std::unique_ptr<mpe::ControllerHost> host;
     Library lib;
     std::string cache = home() + "/.cache/odo/instruments";
 
-    int sound = 0, controller = 0;
-    std::vector<double> settings;       // the controller's, by position
-    std::vector<size_t> shown;          // the ones on the rail (not "hidden"), in order
+    // One side of the window: a controller, its settings and its sound (part k of the engine).
+    struct Side {
+        int controller = 0, sound = 0;
+        std::unique_ptr<mpe::ControllerHost> host;
+        std::vector<double> settings;   // the controller's, by position
+        std::vector<size_t> shown;      // the ones on the rail (not "hidden"), in order
+        float x = 0, y = 0, w = 0, h = 0;   // its place in the window
+        float initW = 0, initH = 0;     // the size its controller was started with
+        int engineIndex = -1;           // the instrument its part plays now
+    };
+    Side sides[kSides];
+    int split = 0, active = 0;          // the split, and the side the rail changes
+    int count() const { return kSplits[split].sides; }
+    Side& cur() { return sides[active]; }
 
     // Remembered between sessions (~/.config/odo/settings.json): each controller's settings by
-    // name, the controller and sound in use, the rail and full screen.
+    // name (a side after the first keeps its own, "id#2" and on), the split, each side's
+    // controller and sound, the rail and full screen.
     std::string configPath = home() + "/.config/odo/settings.json";
     bool persist = true;
     std::map<std::string, std::map<std::string, double>> saved;
-    std::string savedController, savedSound;
+    std::string savedController[kSides], savedSound[kSides];
+    int savedSplit = 0, savedActive = 0;
     bool savedFullscreen = false;
 
     void loadConfig() {
@@ -124,8 +157,15 @@ struct App {
         ss << f.rdbuf();
         mpe::Json j = mpe::Json::parse(ss.str());
         if (j.type != mpe::Json::Object) return;
-        savedController = j["controller"].str();
-        savedSound = j["sound"].str();
+        savedController[0] = j["controller"].str();
+        savedSound[0] = j["sound"].str();
+        const mpe::Json& s = j["sides"];
+        for (size_t k = 0; k < s.size() && k < size_t(kSides); k++) {
+            if (!s[k]["controller"].str().empty()) savedController[k] = s[k]["controller"].str();
+            if (!s[k]["sound"].str().empty()) savedSound[k] = s[k]["sound"].str();
+        }
+        savedSplit = std::clamp(int(j["split"].num(0)), 0, kSplitCount - 1);
+        savedActive = std::clamp(int(j["active"].num(0)), 0, kSides - 1);
         railHidden = j["railHidden"].boolean();
         savedFullscreen = j["fullscreen"].boolean();
         const mpe::Json& c = j["controllers"];
@@ -139,15 +179,26 @@ struct App {
         return o + "\"";
     }
 
+    std::string controllerId(int k) const {
+        return lib.controllers.empty() ? "" : lib.controllers[size_t(sides[k].controller)]->id();
+    }
+    std::string soundId(int k) const {
+        return lib.instruments.empty() ? "" : lib.instruments[size_t(sides[k].sound)].pkg->id();
+    }
+    // Where side k keeps its controller's settings.
+    std::string settingsKey(int k) const { return k == 0 ? controllerId(0) : controllerId(k) + "#" + std::to_string(k + 1); }
+
     void saveConfig() {
         if (!persist) return;
         std::error_code ec;
         fs::create_directories(fs::path(configPath).parent_path(), ec);
         std::ofstream f(configPath + ".tmp");
         f.precision(17);     // every digit: a strike zone map is a seven-digit number
-        f << "{\n  \"controller\": " << quoted(lib.controllers.empty() ? "" : lib.controllers[size_t(controller)]->id())
-          << ",\n  \"sound\": " << quoted(lib.instruments.empty() ? "" : lib.instruments[size_t(sound)].pkg->id())
-          << ",\n  \"railHidden\": " << (railHidden ? "true" : "false")
+        f << "{\n  \"controller\": " << quoted(controllerId(0)) << ",\n  \"sound\": " << quoted(soundId(0))
+          << ",\n  \"split\": " << split << ",\n  \"active\": " << active << ",\n  \"sides\": [";
+        for (int k = 0; k < kSides; k++)
+            f << (k ? ", " : "") << "{\"controller\": " << quoted(controllerId(k)) << ", \"sound\": " << quoted(soundId(k)) << "}";
+        f << "],\n  \"railHidden\": " << (railHidden ? "true" : "false")
           << ",\n  \"fullscreen\": " << ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? "true" : "false")
           << ",\n  \"controllers\": {";
         bool first = true;
@@ -163,11 +214,10 @@ struct App {
         fs::rename(configPath + ".tmp", configPath, ec);
     }
 
-    void setRailHidden(bool on) { railHidden = on; surfaceW = 0; saveConfig(); }
+    void setRailHidden(bool on) { railHidden = on; saveConfig(); }
     void setFullscreen(bool on) { SDL_SetWindowFullscreen(window, on); saveConfig(); }
     bool fullscreen() const { return (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0; }
     bool railHidden = false, eink = false, logMidi = false;
-    float surfaceW = 0, surfaceH = 0;
 
     // Compiling an instrument takes a moment: done on a worker, handed back to the main thread.
     std::thread worker;
@@ -180,15 +230,16 @@ struct App {
     std::unique_ptr<Updater> updater;
     char** argv = nullptr;                 // to start again after an update
 
-    std::map<SDL_FingerID, int> fingers;   // touch screen fingers -> the controller's touch ids
+    // Each pointer (a finger, the mouse, a self-test's touch) plays the side it went down on,
+    // as that controller's touch id, until it lifts.
+    struct Pointer { int side, id; };
+    std::map<int64_t, Pointer> pointers;
     int nextFinger = 1;
-    bool mouseDown = false;
 
     // Before SDL_Quit: the audio stream belongs to SDL.
     void shutdown() {
         if (worker.joinable()) worker.join();
-        if (host) host->stop();
-        host.reset();
+        for (Side& s : sides) { if (s.host) s.host->stop(); s.host.reset(); }
         if (audio) SDL_DestroyAudioStream(audio);
         audio = nullptr;
     }
@@ -215,93 +266,192 @@ struct App {
         return true;
     }
 
-    // ---- sounds ---------------------------------------------------------------------------------
+    // ---- sides ----------------------------------------------------------------------------------
 
-    void applySound(int k) {
-        const mpe::Json& s = lib.instruments[size_t(k)].pkg->manifest["sound"];
-        mpe::Performance p;
-        mpe::PartConfig& c = p.part[0];
-        c.reverb = float(s["reverb"].num(0.15));
-        c.delay = float(s["delay"].num(0));
-        c.brightness = float(s["brightness"].num(1));
-        c.drive = float(s["drive"].num(0));
-        c.pressureCurve = float(s["pressureCurve"].num(1));
-        c.release = float(s["release"].num(0));
-        p.reverbSize = float(s["reverbSize"].num(0.5));
-        p.reverbDamp = float(s["reverbDamp"].num(0.4));
-        engine->setPerformance(p);
-        engine->setInstrument(0, lib.instruments[size_t(k)].index);
-        if (host) host->instrument(0, centerNote(*lib.instruments[size_t(k)].pkg));
-        status.clear();
+    // Where each side is: the window right of the rail, shared as the split says.
+    void layoutSides() {
+        int ww, wh;
+        SDL_GetWindowSize(window, &ww, &wh);
+        float ax = railW(), aw = float(ww) - ax, ah = float(wh);
+        const Split& sp = kSplits[split];
+        int cols = sp.cols, rows = (sp.sides + cols - 1) / cols;
+        float cw = (aw - kGap * float(cols - 1)) / float(cols), rh = (ah - kGap * float(rows - 1)) / float(rows);
+        for (int k = 0; k < sp.sides; k++) {
+            Side& s = sides[k];
+            s.x = ax + float(k % cols) * (cw + kGap);
+            s.y = float(k / cols) * (rh + kGap);
+            s.w = cw;
+            s.h = rh;
+        }
+    }
+
+    int sideAt(float x, float y) const {
+        for (int k = 0; k < count(); k++) {
+            const Side& s = sides[k];
+            if (x >= s.x - kGap / 2 && x < s.x + s.w + kGap / 2 && y >= s.y - kGap / 2 && y < s.y + s.h + kGap / 2) return k;
+        }
+        return -1;
+    }
+
+    // Each side's controller sends on its own MIDI channels, to its own part: a side's notes never
+    // take another's channel or sound.
+    void route(int k) {
+        if (!sides[k].host) return;
+        int per = 15 / count();
+        sides[k].host->setPart(k);
+        sides[k].host->setChannels(1 + k * per, per);
+    }
+
+    void setSplit(int n) {
+        split = (n % kSplitCount + kSplitCount) % kSplitCount;
+        for (int k = 0; k < kSides; k++) {
+            Side& s = sides[k];
+            if (k >= count()) {                  // a side no longer shown: its notes stop
+                if (s.host) s.host->stop();
+                s.host.reset();
+                s.engineIndex = -1;
+                continue;
+            }
+            if (!s.host) chooseController(k, s.controller);
+            route(k);
+            s.initW = s.initH = 0;               // started again, at its new size
+        }
+        active = std::min(active, count() - 1);
+        pointers.clear();
+        applySounds();
+        ensureLoading();
         saveConfig();
     }
 
-    void chooseSound(int k) {
+    void setActive(int k) { active = (k % count() + count()) % count(); settingsScroll = 0; saveConfig(); }
+
+    // ---- sounds ---------------------------------------------------------------------------------
+
+    // The engine's parts: one per side, each with its sound's effects; and each sound in its part.
+    void applySounds() {
+        mpe::Performance p;
+        p.layout = count() > 1 ? mpe::Layout::Split : mpe::Layout::Single;
+        for (int k = 0; k < count() && !lib.instruments.empty(); k++) {
+            const mpe::Json& s = lib.instruments[size_t(sides[k].sound)].pkg->manifest["sound"];
+            mpe::PartConfig& c = p.part[k];
+            c.reverb = float(s["reverb"].num(0.15));
+            c.delay = float(s["delay"].num(0));
+            c.brightness = float(s["brightness"].num(1));
+            c.drive = float(s["drive"].num(0));
+            c.pressureCurve = float(s["pressureCurve"].num(1));
+            c.release = float(s["release"].num(0));
+            if (k == 0) {                        // the room is shared: the first side's
+                p.reverbSize = float(s["reverbSize"].num(0.5));
+                p.reverbDamp = float(s["reverbDamp"].num(0.4));
+            }
+        }
+        engine->setPerformance(p);
+        for (int k = 0; k < count() && !lib.instruments.empty(); k++) {
+            Side& sd = sides[k];
+            const Instrument& in = lib.instruments[size_t(sd.sound)];
+            if (in.index < 0) continue;
+            if (sd.engineIndex != in.index) { engine->setInstrument(k, in.index); sd.engineIndex = in.index; }
+            if (sd.host) sd.host->instrument(0, centerNote(*in.pkg));
+        }
+    }
+
+    void chooseSound(int k, int n) {
         if (lib.instruments.empty()) return;
-        k = (k % int(lib.instruments.size()) + int(lib.instruments.size())) % int(lib.instruments.size());
-        sound = k;
-        Instrument& in = lib.instruments[size_t(k)];
-        if (in.index >= 0) { applySound(k); return; }
-        if (compiling) return;                       // one at a time; picked again when it is done
-        compiling = true;
-        status = "Loading " + in.pkg->name() + "...";
-        if (worker.joinable()) worker.join();
-        worker = std::thread([this, k] {
-            std::string err;
-            int idx = mpe::loadInstrumentPackage(*lib.instruments[size_t(k)].pkg, cache, &err);
-            std::lock_guard<std::mutex> g(doneLock);
-            doneSound = k; doneIndex = idx; doneError = err;
-            compiling = false;
-        });
+        n = (n % int(lib.instruments.size()) + int(lib.instruments.size())) % int(lib.instruments.size());
+        sides[k].sound = n;
+        if (lib.instruments[size_t(n)].index >= 0) { status.clear(); applySounds(); }
+        else ensureLoading();
+        saveConfig();
+    }
+
+    // Compile the first sound a side wants that isn't ready (one at a time).
+    void ensureLoading() {
+        if (compiling || lib.instruments.empty()) return;
+        for (int k = 0; k < count(); k++) {
+            int n = sides[k].sound;
+            Instrument& in = lib.instruments[size_t(n)];
+            if (in.index >= 0 || !in.error.empty()) continue;
+            compiling = true;
+            status = "Loading " + in.pkg->name() + "...";
+            if (worker.joinable()) worker.join();
+            worker = std::thread([this, n] {
+                std::string err;
+                int idx = mpe::loadInstrumentPackage(*lib.instruments[size_t(n)].pkg, cache, &err);
+                std::lock_guard<std::mutex> g(doneLock);
+                doneSound = n; doneIndex = idx; doneError = err;
+                compiling = false;
+            });
+            return;
+        }
     }
 
     void collectCompiled() {
-        std::lock_guard<std::mutex> g(doneLock);
-        if (doneSound < 0) return;
-        Instrument& in = lib.instruments[size_t(doneSound)];
-        in.index = doneIndex;
-        in.error = doneError;
-        if (doneIndex < 0) status = "Could not load " + in.pkg->name() + ": " + doneError;
-        else if (doneSound == sound) applySound(sound);
-        int again = doneSound != sound ? sound : -1;   // the player moved on while it compiled
-        doneSound = -1;
-        if (again >= 0) { doneLock.unlock(); chooseSound(again); doneLock.lock(); }
+        {
+            std::lock_guard<std::mutex> g(doneLock);
+            if (doneSound < 0) return;
+            Instrument& in = lib.instruments[size_t(doneSound)];
+            in.index = doneIndex;
+            in.error = doneError;
+            if (doneIndex < 0) status = "Could not load " + in.pkg->name() + ": " + doneError;
+            else status.clear();
+            doneSound = -1;
+        }
+        applySounds();
+        ensureLoading();                         // the next side's, or one picked meanwhile
+    }
+
+    bool soundsReady() const {
+        for (int k = 0; k < count(); k++)
+            if (lib.instruments.empty() || lib.instruments[size_t(sides[k].sound)].index < 0) return false;
+        return true;
     }
 
     // ---- controllers ----------------------------------------------------------------------------
 
-    void chooseController(int k) {
+    void chooseController(int k, int n) {
         if (lib.controllers.empty()) return;
-        k = (k % int(lib.controllers.size()) + int(lib.controllers.size())) % int(lib.controllers.size());
-        controller = k;
-        fingers.clear();
-        host = std::make_unique<mpe::ControllerHost>([this](const uint8_t* b, int n) {
-            if (logMidi) std::printf("midi %02x %02x %02x\n", b[0], n > 1 ? b[1] : 0, n > 2 ? b[2] : 0);
-            midi->feed(b, n, mpe::steadyNowNs());
+        n = (n % int(lib.controllers.size()) + int(lib.controllers.size())) % int(lib.controllers.size());
+        Side& sd = sides[k];
+        if (sd.host) sd.host->stop();
+        sd.controller = n;
+        for (auto it = pointers.begin(); it != pointers.end();) it = it->second.side == k ? pointers.erase(it) : std::next(it);
+        sd.host = std::make_unique<mpe::ControllerHost>([this](const uint8_t* b, int len) {
+            if (logMidi) std::printf("midi %02x %02x %02x\n", b[0], len > 1 ? b[1] : 0, len > 2 ? b[2] : 0);
+            midi->feed(b, len, mpe::steadyNowNs());
         });
         std::string err;
-        if (!host->load(*lib.controllers[size_t(k)], &err)) { status = err; host.reset(); return; }
-        settings.clear();
-        settingsScroll = 0;
-        const mpe::Json& s = host->manifest()["settings"];
-        const auto& mine = saved[lib.controllers[size_t(k)]->id()];
-        shown.clear();
-        for (size_t i = 0; i < s.size(); i++) if (!s[i]["hidden"].boolean()) shown.push_back(i);
+        if (!sd.host->load(*lib.controllers[size_t(n)], &err)) { status = err; sd.host.reset(); return; }
+        route(k);
+        sd.settings.clear();
+        if (k == active) settingsScroll = 0;
+        const mpe::Json& s = sd.host->manifest()["settings"];
+        // A side after the first starts from the first side's settings for this controller.
+        auto own = saved.find(settingsKey(k));
+        const auto& mine = own != saved.end() ? own->second : saved[controllerId(k)];
+        sd.shown.clear();
+        for (size_t i = 0; i < s.size(); i++) if (!s[i]["hidden"].boolean()) sd.shown.push_back(i);
         for (size_t i = 0; i < s.size(); i++) {
             auto it = mine.find(s[i]["id"].str());
-            settings.push_back(it != mine.end() ? it->second : s[i]["default"].num());
-            if (it != mine.end()) host->setting(int(i), it->second);
+            sd.settings.push_back(it != mine.end() ? it->second : s[i]["default"].num());
+            if (it != mine.end()) sd.host->setting(int(i), it->second);
         }
-        surfaceW = surfaceH = 0;                     // init() at the next frame, with the surface's size
+        sd.initW = sd.initH = 0;                 // init() at the next frame, with its size
         saveConfig();
-        if (!lib.instruments.empty() && lib.instruments[size_t(sound)].index >= 0)
-            host->instrument(0, centerNote(*lib.instruments[size_t(sound)].pkg));
+        if (!lib.instruments.empty() && lib.instruments[size_t(sd.sound)].index >= 0)
+            sd.host->instrument(0, centerNote(*lib.instruments[size_t(sd.sound)].pkg));
+    }
+
+    void keepSetting(int k, size_t i, double v) {
+        Side& sd = sides[k];
+        sd.settings[i] = v;
+        saved[settingsKey(k)][sd.host->manifest()["settings"][i]["id"].str()] = v;
     }
 
     void changeSetting(size_t i, int dir) {
-        const mpe::Json& s = host->manifest()["settings"][i];
+        Side& sd = cur();
+        const mpe::Json& s = sd.host->manifest()["settings"][i];
         std::string type = s["type"].str();
-        double v = settings[i];
+        double v = sd.settings[i];
         if (type == "switch") v = v != 0 ? 0 : 1;
         else if (type == "choice") {
             double n = double(s["options"].size());
@@ -310,16 +460,15 @@ struct App {
             double step = s["step"].num(1);
             v = std::clamp(v + dir * (step > 0 ? step : 1), s["min"].num(0), s["max"].num(1));
         }
-        settings[i] = v;
-        host->setting(int(i), v);
-        saved[lib.controllers[size_t(controller)]->id()][s["id"].str()] = v;
+        sd.host->setting(int(i), v);
+        keepSetting(active, i, v);
         saveConfig();
     }
 
-    std::string settingValue(size_t i) const {
-        const mpe::Json& s = host->manifest()["settings"][i];
+    std::string settingValue(size_t i) {
+        const mpe::Json& s = cur().host->manifest()["settings"][i];
         std::string type = s["type"].str();
-        double v = settings[i];
+        double v = cur().settings[i];
         if (type == "switch") return v != 0 ? "on" : "off";
         if (type == "choice") return s["options"][size_t(v)].str();
         char b[32];
@@ -328,6 +477,10 @@ struct App {
     }
 
     // ---- input ----------------------------------------------------------------------------------
+
+    // The rail's rows: the top buttons, the split, the side it changes, its controller and sound;
+    // then that controller's settings.
+    enum { kRowTop, kRowSplit, kRowSide, kRowController, kRowSound };
 
     // A tap on the rail: which row, and whether on its left (back) or right (on) half. The update
     // row is at the bottom.
@@ -341,34 +494,36 @@ struct App {
             return;
         }
         int row = int(y / kRow);
-        if (row == 0) {                                  // the top row's buttons: full screen, hide
+        if (row == kRowTop) {                            // the top row's buttons: full screen, hide
             if (x >= kRail - kButton) setRailHidden(true);
             else if (x >= kRail - 2 * kButton) setFullscreen(!fullscreen());
             return;
         }
         // "<" goes back, ">" on, the rest of the row on (a switch flips).
         int dir = x >= kRail - 2 * kButton && x < kRail - kButton ? -1 : 1;
-        if (row == 1) chooseController(controller + dir);
-        else if (row == 2) chooseSound(sound + dir);
-        else if (host && y >= kSettingsTop && y < float(wh) - kBottom) {
-            size_t row = size_t((y - kSettingsTop + settingsScroll) / settingRow(float(wh)));
-            if (row < shown.size()) changeSetting(shown[row], dir);
+        if (row == kRowSplit) setSplit(split + dir);
+        else if (row == kRowSide) setActive(active + dir);
+        else if (row == kRowController) chooseController(active, cur().controller + dir);
+        else if (row == kRowSound) chooseSound(active, cur().sound + dir);
+        else if (cur().host && y >= kSettingsTop && y < float(wh) - kBottom) {
+            size_t r = size_t((y - kSettingsTop + settingsScroll) / settingRow(float(wh)));
+            if (r < cur().shown.size()) changeSetting(cur().shown[r], dir);
         }
     }
 
     // A finger (or the mouse) on the rail: a tap acts when it lifts; a drag scrolls the settings.
     // phase 0 down, 1 move, 2 up. True if the rail took it.
-    static constexpr SDL_FingerID kMouseFinger = SDL_FingerID(-1);
+    static constexpr int64_t kMouse = -1;
     static constexpr float kButton = 40;           // the arrows' and the top buttons' width
-    struct Press { bool on = false; SDL_FingerID id = 0; float x = 0, y0 = 0, last = 0; bool dragged = false; } press;
+    struct Press { bool on = false; int64_t id = 0; float x = 0, y0 = 0, last = 0; bool dragged = false; } press;
     float settingsScroll = 0;
 
     void scrollSettings(float by, float h) {
-        float rows = float(shown.size()) * settingRow(h), room = h - kBottom - kSettingsTop;
+        float rows = float(cur().shown.size()) * settingRow(h), room = h - kBottom - kSettingsTop;
         settingsScroll = std::clamp(settingsScroll + by, 0.f, std::max(0.f, rows - room));
     }
 
-    bool railPress(int phase, SDL_FingerID id, float x, float y) {
+    bool railPress(int phase, int64_t id, float x, float y) {
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
         if (phase == 0) {
@@ -392,62 +547,62 @@ struct App {
 
     // The controller's settings fill the rail between the sound and the lines at the bottom:
     // each row as tall as fits, down to a compact one.
-    static constexpr float kSettingsTop = 3.7f * kRow, kBottom = 84;
-    float settingRow(float h) const {
-        if (shown.empty()) return kRow;
-        return std::clamp((h - kBottom - kSettingsTop) / float(shown.size()), 30.f, kRow);
+    static constexpr float kSettingsTop = 5.7f * kRow, kBottom = 84;
+    float settingRow(float h) {
+        if (cur().shown.empty()) return kRow;
+        return std::clamp((h - kBottom - kSettingsTop) / float(cur().shown.size()), 30.f, kRow);
     }
 
-    void surfaceTouch(int id, mpe::ControllerHost::Phase ph, float x, float y, float force) {
-        if (host) host->touch(id, ph, x - railW(), y, 0, force);
+    // A pointer on the play area: down on a side, it plays that side until it lifts.
+    void pointer(int64_t key, mpe::ControllerHost::Phase ph, float x, float y, float force) {
+        if (ph == mpe::ControllerHost::Down) {
+            layoutSides();
+            int k = sideAt(x, y);
+            if (k < 0 || !sides[k].host) return;
+            Pointer p{k, nextFinger++};
+            pointers[key] = p;
+            sides[k].host->touch(p.id, ph, x - sides[k].x, y - sides[k].y, 0, force);
+            return;
+        }
+        auto it = pointers.find(key);
+        if (it == pointers.end()) return;
+        Side& s = sides[it->second.side];
+        if (s.host) s.host->touch(it->second.id, ph, x - s.x, y - s.y, 0, force);
+        if (ph == mpe::ControllerHost::Up || ph == mpe::ControllerHost::Cancel) pointers.erase(it);
     }
 
     void handle(const SDL_Event& e) {
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
+        using H = mpe::ControllerHost;
         switch (e.type) {
             case SDL_EVENT_FINGER_DOWN:
             case SDL_EVENT_FINGER_MOTION:
             case SDL_EVENT_FINGER_UP:
             case SDL_EVENT_FINGER_CANCELED: {
                 float x = e.tfinger.x * float(ww), y = e.tfinger.y * float(wh);
-                if (railPress(e.type == SDL_EVENT_FINGER_DOWN ? 0 : e.type == SDL_EVENT_FINGER_MOTION ? 1 : 2,
-                              e.tfinger.fingerID, x, y)) return;
-                if (e.type == SDL_EVENT_FINGER_DOWN) {
-                    int id = nextFinger++;
-                    fingers[e.tfinger.fingerID] = id;
-                    surfaceTouch(id, mpe::ControllerHost::Down, x, y, e.tfinger.pressure);
-                    return;
-                }
-                auto it = fingers.find(e.tfinger.fingerID);
-                if (it == fingers.end()) return;
-                if (e.type == SDL_EVENT_FINGER_MOTION) surfaceTouch(it->second, mpe::ControllerHost::Move, x, y, e.tfinger.pressure);
-                else {
-                    surfaceTouch(it->second, e.type == SDL_EVENT_FINGER_UP ? mpe::ControllerHost::Up : mpe::ControllerHost::Cancel,
-                                 x, y, 0);
-                    fingers.erase(it);
-                }
+                int64_t key = int64_t(e.tfinger.fingerID & 0x7FFFFFFFFFFFFFFFull);
+                if (railPress(e.type == SDL_EVENT_FINGER_DOWN ? 0 : e.type == SDL_EVENT_FINGER_MOTION ? 1 : 2, key, x, y)) return;
+                H::Phase ph = e.type == SDL_EVENT_FINGER_DOWN ? H::Down : e.type == SDL_EVENT_FINGER_MOTION ? H::Move
+                            : e.type == SDL_EVENT_FINGER_UP ? H::Up : H::Cancel;
+                pointer(key, ph, x, y, ph == H::Up || ph == H::Cancel ? 0 : e.tfinger.pressure);
                 return;
             }
-            // The mouse is one finger (id 0). Touches also arrive as mouse events: those are skipped.
+            // The mouse is one more pointer. Touches also arrive as mouse events: those are skipped.
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 if (e.button.which == SDL_TOUCH_MOUSEID || e.button.button != SDL_BUTTON_LEFT) return;
-                if (railPress(0, kMouseFinger, e.button.x, e.button.y)) return;
-                mouseDown = true;
-                surfaceTouch(0, mpe::ControllerHost::Down, e.button.x, e.button.y, 0.8f);
+                if (railPress(0, kMouse, e.button.x, e.button.y)) return;
+                pointer(kMouse, H::Down, e.button.x, e.button.y, 0.8f);
                 return;
             case SDL_EVENT_MOUSE_MOTION:
                 if (e.motion.which == SDL_TOUCH_MOUSEID) return;
-                if (railPress(1, kMouseFinger, e.motion.x, e.motion.y)) return;
-                if (!mouseDown) return;
-                surfaceTouch(0, mpe::ControllerHost::Move, e.motion.x, e.motion.y, 0.8f);
+                if (railPress(1, kMouse, e.motion.x, e.motion.y)) return;
+                pointer(kMouse, H::Move, e.motion.x, e.motion.y, 0.8f);
                 return;
             case SDL_EVENT_MOUSE_BUTTON_UP:
                 if (e.button.which == SDL_TOUCH_MOUSEID) return;
-                if (railPress(2, kMouseFinger, e.button.x, e.button.y)) return;
-                if (!mouseDown) return;
-                mouseDown = false;
-                surfaceTouch(0, mpe::ControllerHost::Up, e.button.x, e.button.y, 0);
+                if (railPress(2, kMouse, e.button.x, e.button.y)) return;
+                pointer(kMouse, H::Up, e.button.x, e.button.y, 0);
                 return;
             case SDL_EVENT_MOUSE_WHEEL: {
                 float mx, my;
@@ -458,8 +613,8 @@ struct App {
             case SDL_EVENT_KEY_DOWN:
                 if (e.key.key == SDLK_TAB) setRailHidden(!railHidden);
                 else if (e.key.key == SDLK_F11) setFullscreen(!fullscreen());
-                else if (e.key.key == SDLK_RIGHT) chooseSound(sound + 1);
-                else if (e.key.key == SDLK_LEFT) chooseSound(sound - 1);
+                else if (e.key.key == SDLK_RIGHT) chooseSound(active, cur().sound + 1);
+                else if (e.key.key == SDLK_LEFT) chooseSound(active, cur().sound - 1);
                 return;
             default: return;
         }
@@ -484,11 +639,11 @@ struct App {
             size_t room = size_t((kRail - 2 * kButton - 16) / size);
             return draw::textWidth(size, v) <= kRail - 2 * kButton - 16 ? v : v.substr(0, room > 2 ? room - 2 : room) + "..";
         };
-        auto row = [&](int k, const std::string& label, const std::string& value) {
+        auto row = [&](int k, const std::string& label, const std::string& value, draw::Color c, bool withArrows) {
             float y = float(k) * kRow;
             draw::text(renderer, 12, y + 19, 11, dim, label);
-            draw::text(renderer, 12, y + 37, 13, text, fit(value, 13));
-            arrows(y, kRow);
+            draw::text(renderer, 12, y + 37, 13, c, fit(value, 13));
+            if (withArrows) arrows(y, kRow);
         };
         draw::text(renderer, 12, 30, 18, accent, "odo", 0, true);
         // The top row's buttons: full screen, and hide the rail.
@@ -496,24 +651,28 @@ struct App {
         draw::fillRect(renderer, kRail - kButton + 2, 5, kButton - 4, kRow - 10, key, 6);
         draw::strokeRect(renderer, kRail - 1.5f * kButton - 9, kRow / 2 - 7, 18, 14, fullscreen() ? accent : text, 2, 2);
         draw::text(renderer, kRail - 0.5f * kButton, kRow / 2 + 6, 12, text, "<<", 1);
-        row(1, "Controller", host ? lib.controllers[size_t(controller)]->name() : "none");
-        std::string snd = lib.instruments.empty() ? "none" : lib.instruments[size_t(sound)].pkg->name();
-        row(2, "Sound", compiling ? snd + "..." : snd);
-        draw::line(renderer, 12, 3.5f * kRow, kRail - 12, 3.5f * kRow, rgba(0x9AA2B460), 1);
-        if (host) {
-            const mpe::Json& s = host->manifest()["settings"];
+        row(kRowSplit, "Split", kSplits[split].name, text, true);
+        row(kRowSide, count() > 1 ? "Changing" : "Side", kSplits[split].side[active], count() > 1 ? accent : dim, count() > 1);
+        Side& sd = cur();
+        row(kRowController, "Controller", sd.host ? lib.controllers[size_t(sd.controller)]->name() : "none", text, true);
+        std::string snd = lib.instruments.empty() ? "none" : lib.instruments[size_t(sd.sound)].pkg->name();
+        bool loading = !lib.instruments.empty() && lib.instruments[size_t(sd.sound)].index < 0 && lib.instruments[size_t(sd.sound)].error.empty();
+        row(kRowSound, "Sound", loading ? snd + "..." : snd, text, true);
+        draw::line(renderer, 12, 5.5f * kRow, kRail - 12, 5.5f * kRow, rgba(0x9AA2B460), 1);
+        if (sd.host) {
+            const mpe::Json& s = sd.host->manifest()["settings"];
             float rh = settingRow(h);
             scrollSettings(0, h);                // keep the scroll in range (the window may have grown)
             bool big = rh >= 40;
-            for (size_t row = 0; row < shown.size(); row++) {
-                size_t i = shown[row];
-                float y = kSettingsTop + float(row) * rh - settingsScroll;
+            for (size_t r = 0; r < sd.shown.size(); r++) {
+                size_t i = sd.shown[r];
+                float y = kSettingsTop + float(r) * rh - settingsScroll;
                 if (y < kSettingsTop - 1 || y + rh > h - kBottom + 1) continue;   // scrolled out of the rail
                 draw::text(renderer, 12, y + (big ? 19 : 12), big ? 11 : 8, dim, fit(s[i]["name"].str(), big ? 11 : 8));
                 draw::text(renderer, 12, y + (big ? 37 : 26), big ? 13 : 10, text, fit(settingValue(i), big ? 13 : 10));
                 arrows(y, rh);
             }
-            float rows = float(shown.size()) * rh, room = h - kBottom - kSettingsTop;
+            float rows = float(sd.shown.size()) * rh, room = h - kBottom - kSettingsTop;
             if (rows > room) {                   // a scroll bar: how much of the settings shows, and where
                 float bar = room * room / rows, at = kSettingsTop + (room - bar) * settingsScroll / (rows - room);
                 draw::fillRect(renderer, kRail - 4, at, 2, bar, rgba(0x9AA2B480), 1);
@@ -539,35 +698,54 @@ struct App {
         collectCompiled();
         int ww, wh;
         SDL_GetWindowSize(window, &ww, &wh);
-        float sw = float(ww) - railW(), sh = float(wh);
-        if (host && (sw != surfaceW || sh != surfaceH)) {
-            surfaceW = sw; surfaceH = sh;
-            host->init(sw, sh, eink ? 1 : 0);
-            for (size_t i = 0; i < settings.size(); i++) host->setting(int(i), settings[i]);
-            if (!lib.instruments.empty() && lib.instruments[size_t(sound)].index >= 0)
-                host->instrument(0, centerNote(*lib.instruments[size_t(sound)].pkg));
-        }
-        if (host) {
-            host->tick();
-            // Settings it changed itself (its editor, a button on its surface): kept as if set here.
-            for (const auto& c : host->takeSettingChanges()) {
-                if (size_t(c.index) >= settings.size()) continue;
-                settings[size_t(c.index)] = c.value;
-                saved[lib.controllers[size_t(controller)]->id()][host->manifest()["settings"][size_t(c.index)]["id"].str()] = c.value;
-                saveConfig();
+        layoutSides();
+        for (int k = 0; k < count(); k++) {
+            Side& sd = sides[k];
+            if (!sd.host) continue;
+            if (sd.w != sd.initW || sd.h != sd.initH) {
+                sd.initW = sd.w; sd.initH = sd.h;
+                sd.host->init(sd.w, sd.h, eink ? 1 : 0);
+                for (size_t i = 0; i < sd.settings.size(); i++) sd.host->setting(int(i), sd.settings[i]);
+                if (!lib.instruments.empty() && lib.instruments[size_t(sd.sound)].index >= 0)
+                    sd.host->instrument(0, centerNote(*lib.instruments[size_t(sd.sound)].pkg));
             }
+            sd.host->tick();
+            // Settings it changed itself (its editor, a button on its surface): kept as if set here.
+            bool changed = false;
+            for (const auto& c : sd.host->takeSettingChanges()) {
+                if (size_t(c.index) >= sd.settings.size()) continue;
+                keepSetting(k, size_t(c.index), c.value);
+                changed = true;
+            }
+            if (changed) saveConfig();
         }
         SDL_SetRenderViewport(renderer, nullptr);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
-        SDL_Rect area{int(railW()), 0, int(sw), int(sh)};
-        SDL_SetRenderViewport(renderer, &area);
         SDL_SetRenderClipRect(renderer, nullptr);
-        if (host) draw::list(renderer, host->drawList(), sw, sh);
-        else draw::text(renderer, 20, 40, 14, rgba(0xFFFFFFFF), "No controller packages (.odoc) in the library.");
-        if (!status.empty()) draw::text(renderer, 16, sh - 16, 12, rgba(0xFFC857FF), status);
+        bool any = false;
+        for (int k = 0; k < count(); k++) {
+            Side& sd = sides[k];
+            if (!sd.host) continue;
+            any = true;
+            SDL_Rect area{int(sd.x), int(sd.y), int(sd.w), int(sd.h)};
+            SDL_SetRenderViewport(renderer, &area);
+            draw::list(renderer, sd.host->drawList(), sd.w, sd.h);
+        }
         SDL_SetRenderViewport(renderer, nullptr);
-        if (!railHidden) drawRail(sh);
+        // The lines between the sides; with the rail out, the side it changes is outlined.
+        for (int k = 0; k < count() && count() > 1; k++) {
+            const Side& sd = sides[k];
+            if (sd.x > railW() + 1) draw::fillRect(renderer, sd.x - kGap, sd.y, kGap, sd.h, rgba(0x000000FF));
+            if (sd.y > 1) draw::fillRect(renderer, sd.x, sd.y - kGap, sd.w, kGap, rgba(0x000000FF));
+        }
+        if (!railHidden && count() > 1) {
+            const Side& sd = cur();
+            draw::strokeRect(renderer, sd.x + 1, sd.y + 1, sd.w - 2, sd.h - 2, rgba(0xFF8A65B0), 2, 4);
+        }
+        if (!any) draw::text(renderer, railW() + 20, 40, 14, rgba(0xFFFFFFFF), "No controller packages (.odoc) in the library.");
+        if (!status.empty()) draw::text(renderer, railW() + 16, float(wh) - 16, 12, rgba(0xFFC857FF), status);
+        if (!railHidden) drawRail(float(wh));
         else {                                           // the corner button that brings the rail back
             draw::fillRect(renderer, 6, 6, 36, 36, rgba(0x07080BCC), 8);
             draw::text(renderer, 24, 30, 12, rgba(0xFFFFFFD9), ">>", 1);
@@ -576,11 +754,11 @@ struct App {
     }
 };
 
-// Plays the controller by itself for a moment and saves what was on screen: a check that runs
-// without a touch screen (SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy). Fingers go down at
-// `touches` (fractions of the controller's surface; by default two places on the Tonnetz),
-// optionally move by `move` (fractions), and stay down while the screenshot is taken. Passes if
-// at least `expect` voices sound.
+// Plays the controllers by themselves for a moment and saves what was on screen: a check that
+// runs without a touch screen (SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy). Fingers go down
+// at `touches` (fractions of the play area, right of the rail; by default two places on the
+// Tonnetz), optionally move by `move` (fractions), and stay down while the screenshot is taken.
+// Passes if at least `expect` voices sound.
 struct Selftest {
     std::vector<std::pair<float, float>> touches;
     float moveX = 0, moveY = 0;
@@ -592,32 +770,40 @@ int selftest(App& app, const char* out, Selftest t) {
         Uint64 end = SDL_GetTicks() + Uint64(ms);
         while (SDL_GetTicks() < end) { SDL_Event e; while (SDL_PollEvent(&e)) {} app.frame(); SDL_Delay(5); }
     };
-    while (app.compiling || app.lib.instruments.empty() || app.lib.instruments[size_t(app.sound)].index < 0) {
-        if (!app.compiling && !app.lib.instruments.empty() && app.lib.instruments[size_t(app.sound)].index < 0 &&
-            !app.lib.instruments[size_t(app.sound)].error.empty()) { std::fprintf(stderr, "selftest: %s\n", app.status.c_str()); return 1; }
+    while (!app.soundsReady()) {
+        for (int k = 0; k < app.count(); k++)
+            if (!app.compiling && !app.lib.instruments.empty() && !app.lib.instruments[size_t(app.sides[k].sound)].error.empty()) {
+                std::fprintf(stderr, "selftest: %s\n", app.status.c_str());
+                return 1;
+            }
+        if (app.lib.instruments.empty()) { std::fprintf(stderr, "selftest: no instruments\n"); return 1; }
         wait(20);
     }
     wait(100);
+    int ww, wh;
+    SDL_GetWindowSize(app.window, &ww, &wh);
+    float aw = float(ww) - app.railW(), ah = float(wh);
     if (t.touches.empty()) {
         // The Tonnetz at size 7: the C major triangle, and a node.
-        float dx = 1.f / 7, dy = app.surfaceW * dx / app.surfaceH;
+        float dx = 1.f / 7, dy = aw * dx / ah;
         t.touches = {{0.5f + dx / 2, 0.5f - dy * 0.29f}, {0.5f - dx, 0.5f}};
         if (t.expect < 0) t.expect = 4;
     }
     if (t.expect < 0) t.expect = 1;
     auto at = [&](size_t k, float ox, float oy) {
-        return std::make_pair(app.railW() + (t.touches[k].first + ox) * app.surfaceW, (t.touches[k].second + oy) * app.surfaceH);
+        return std::make_pair(app.railW() + (t.touches[k].first + ox) * aw, (t.touches[k].second + oy) * ah);
     };
+    using H = mpe::ControllerHost;
     for (size_t k = 0; k < t.touches.size(); k++) {
         auto p = at(k, 0, 0);
-        app.surfaceTouch(int(k + 1), mpe::ControllerHost::Down, p.first, p.second, 0.8f);
+        app.pointer(int64_t(1000 + k), H::Down, p.first, p.second, 0.8f);
         wait(30);
     }
     if (t.moveX != 0 || t.moveY != 0)
         for (int step = 1; step <= 10; step++) {
             for (size_t k = 0; k < t.touches.size(); k++) {
                 auto p = at(k, t.moveX * float(step) / 10, t.moveY * float(step) / 10);
-                app.surfaceTouch(int(k + 1), mpe::ControllerHost::Move, p.first, p.second, 0.8f);
+                app.pointer(int64_t(1000 + k), H::Move, p.first, p.second, 0.8f);
             }
             wait(20);
         }
@@ -629,13 +815,16 @@ int selftest(App& app, const char* out, Selftest t) {
     if (shot) SDL_DestroySurface(shot);
     for (size_t k = 0; k < t.touches.size(); k++) {
         auto p = at(k, t.moveX, t.moveY);
-        app.surfaceTouch(int(k + 1), mpe::ControllerHost::Up, p.first, p.second, 0);
+        app.pointer(int64_t(1000 + k), H::Up, p.first, p.second, 0);
     }
     wait(100);
+    std::string errors;
+    for (int k = 0; k < app.count(); k++)
+        if (app.sides[k].host && !app.sides[k].host->lastError().empty()) errors += (errors.empty() ? "" : "; ") + app.sides[k].host->lastError();
     std::printf("selftest: %d voices sounding (want at least %d), %llu events, latency avg %.2f ms, controller errors: %s, screenshot %s\n",
                 voices, t.expect, (unsigned long long)st.events, st.eventAgeAvgMs,
-                app.host && !app.host->lastError().empty() ? app.host->lastError().c_str() : "none", saved ? out : "not saved");
-    return voices >= t.expect && (!app.host || app.host->lastError().empty()) ? 0 : 1;
+                errors.empty() ? "none" : errors.c_str(), saved ? out : "not saved");
+    return voices >= t.expect && errors.empty() ? 0 : 1;
 }
 
 }  // namespace
@@ -643,10 +832,11 @@ int selftest(App& app, const char* out, Selftest t) {
 int main(int argc, char** argv) {
     std::vector<std::string> dirs;
     const char* selftestOut = nullptr;
-    std::string controllerId, soundId;
+    std::vector<std::string> controllerIds, soundIds;    // each --controller / --sound: the next side's
     Selftest test;
-    std::vector<std::pair<int, double>> presetSettings;   // --setting INDEX=VALUE
-    int width = 1280, height = 720;
+    struct Preset { int side, index; double value; };
+    std::vector<Preset> presetSettings;                  // --setting [SIDE:]INDEX=VALUE
+    int width = 1280, height = 720, splitArg = -1;
     bool logMidi = false, checkUpdates = true;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -654,8 +844,9 @@ int main(int argc, char** argv) {
         float x = 0, y = 0;
         if (a == "--library" && more) dirs.push_back(argv[++i]);
         else if (a == "--selftest" && more) selftestOut = argv[++i];
-        else if (a == "--controller" && more) controllerId = argv[++i];
-        else if (a == "--sound" && more) soundId = argv[++i];
+        else if (a == "--controller" && more) controllerIds.push_back(argv[++i]);
+        else if (a == "--sound" && more) soundIds.push_back(argv[++i]);
+        else if (a == "--split" && more) splitArg = std::clamp(std::atoi(argv[++i]), 0, kSplitCount - 1);
         else if (a == "--log-midi") logMidi = true;
         else if (a == "--no-update") checkUpdates = false;
         else if (a == "--version") { std::printf("odo %s\n", ODO_DESKTOP_VERSION); return 0; }
@@ -672,13 +863,15 @@ int main(int argc, char** argv) {
         else if (a == "--move" && more && std::sscanf(argv[i + 1], "%f,%f", &x, &y) == 2) { test.moveX = x; test.moveY = y; i++; }
         else if (a == "--expect" && more) test.expect = std::atoi(argv[++i]);
         else if (a == "--setting" && more && std::strchr(argv[i + 1], '=')) {
-            presetSettings.push_back({std::atoi(argv[i + 1]), std::atof(std::strchr(argv[i + 1], '=') + 1)});
-            i++;
+            const char* s = argv[++i];
+            const char *colon = std::strchr(s, ':'), *eq = std::strchr(s, '=');
+            bool sided = colon && colon < eq;
+            presetSettings.push_back({sided ? std::clamp(std::atoi(s) - 1, 0, kSides - 1) : 0, std::atoi(sided ? colon + 1 : s), std::atof(eq + 1)});
         }
         else if (a == "--size" && more && std::sscanf(argv[i + 1], "%dx%d", &width, &height) == 2) i++;
         else {
-            std::fprintf(stderr, "usage: odo [--library DIR]... [--controller ID] [--sound ID] [--log-midi] [--no-update] [--version]\n"
-                                 "           [--setting INDEX=VALUE]... [--selftest out.bmp [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]\n");
+            std::fprintf(stderr, "usage: odo [--library DIR]... [--split N] [--controller ID]... [--sound ID]... [--log-midi] [--no-update] [--version]\n"
+                                 "           [--setting [SIDE:]INDEX=VALUE]... [--selftest out.bmp [--touch X,Y]... [--move DX,DY] [--expect N] [--size WxH]]\n");
             return 2;
         }
     }
@@ -716,32 +909,42 @@ int main(int argc, char** argv) {
     SDL_SetRenderScale(app.renderer, density > 0 ? density : 1, density > 0 ? density : 1);
     app.startAudio();
 
-    // Where you left off (not for a self-test, which neither reads nor writes it): the controller,
-    // the sound, each controller's settings, the rail and full screen.
+    // Where you left off (not for a self-test, which neither reads nor writes it): the split, each
+    // side's controller and sound, each controller's settings, the rail and full screen.
     app.persist = !selftestOut;
     if (app.persist) {
         app.loadConfig();
-        if (controllerId.empty()) controllerId = app.savedController;
-        if (soundId.empty()) soundId = app.savedSound;
         if (app.savedFullscreen) SDL_SetWindowFullscreen(app.window, true);
     }
-    // Else the flute (or --sound) and the first controller (or --controller).
-    if (soundId.empty()) soundId = "patrickreynolds/flute";
-    int sound = 0, ctl = 0;
-    for (size_t i = 0; i < app.lib.instruments.size(); i++) {
-        const auto& p = *app.lib.instruments[i].pkg;
-        if (p.id() == soundId || p.manifest["aliases"][size_t(0)].str() == soundId) sound = int(i);
-    }
-    for (size_t i = 0; i < app.lib.controllers.size(); i++) if (app.lib.controllers[i]->id() == controllerId) ctl = int(i);
-    if (!controllerId.empty() && (app.lib.controllers.empty() || app.lib.controllers[size_t(ctl)]->id() != controllerId))
-        std::fprintf(stderr, "odo: no controller %s in the library\n", controllerId.c_str());
-    app.chooseController(ctl);
-    for (const auto& kv : presetSettings)
-        if (app.host && kv.first >= 0 && size_t(kv.first) < app.settings.size()) {
-            app.settings[size_t(kv.first)] = kv.second;
-            app.host->setting(kv.first, kv.second);
+    // Saving waits until everything is chosen, so a half-made start doesn't overwrite the file.
+    bool persist = app.persist;
+    app.persist = false;
+    for (int k = 0; k < kSides; k++) {
+        // The command line's, else where you left off, else the flute (or the first side's) and the first controller.
+        std::string cid = k < int(controllerIds.size()) ? controllerIds[size_t(k)] : app.savedController[k];
+        std::string sid = k < int(soundIds.size()) ? soundIds[size_t(k)] : app.savedSound[k];
+        if (cid.empty()) cid = k > 0 && !controllerIds.empty() ? controllerIds[0] : app.savedController[0];
+        if (sid.empty()) sid = k > 0 && !soundIds.empty() ? soundIds[0] : app.savedSound[0];
+        if (sid.empty()) sid = "patrickreynolds/flute";
+        for (size_t i = 0; i < app.lib.instruments.size(); i++) {
+            const auto& p = *app.lib.instruments[i].pkg;
+            if (p.id() == sid || p.manifest["aliases"][size_t(0)].str() == sid) app.sides[k].sound = int(i);
         }
-    app.chooseSound(sound);
+        for (size_t i = 0; i < app.lib.controllers.size(); i++) if (app.lib.controllers[i]->id() == cid) app.sides[k].controller = int(i);
+        if (k < int(controllerIds.size()) && (app.lib.controllers.empty() || app.lib.controllers[size_t(app.sides[k].controller)]->id() != cid))
+            std::fprintf(stderr, "odo: no controller %s in the library\n", cid.c_str());
+    }
+    app.active = selftestOut ? 0 : app.savedActive;
+    app.setSplit(splitArg >= 0 ? splitArg : app.savedSplit);
+    for (const auto& ps : presetSettings) {
+        App::Side& sd = app.sides[ps.side];
+        if (sd.host && ps.index >= 0 && size_t(ps.index) < sd.settings.size()) {
+            sd.settings[size_t(ps.index)] = ps.value;
+            sd.host->setting(ps.index, ps.value);
+        }
+    }
+    app.persist = persist;
+    app.saveConfig();
 
     if (selftestOut) { int rc = selftest(app, selftestOut, test); app.shutdown(); SDL_Quit(); return rc; }
     bool running = true;

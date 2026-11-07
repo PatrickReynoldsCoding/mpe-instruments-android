@@ -149,7 +149,7 @@ void ControllerHost::stop() {
     if (w_ && w_->fStop) report(error_, m3_CallV(w_->fStop), "stop");
     later_.clear();
     startVolume_.clear();
-    for (int c = 1; c < 16; c++) {
+    for (int c = chFirst_; c < chEnd_; c++) {
         if (ch_[c].note >= 0) send(uint8_t(0x80 | c), uint8_t(ch_[c].note), 64);
         ch_[c] = Chan();
     }
@@ -209,10 +209,10 @@ void ControllerHost::play(const Note& n) {
         if (bend != h.bend) { h.bend = bend; send(uint8_t(0xE0 | c), uint8_t(bend & 0x7F), uint8_t(bend >> 7)); }
     };
     int c = 0;
-    for (int k = 1; k < 16; k++) if (ch_[k].voice == n.voice) c = k;
+    for (int k = chFirst_; k < chEnd_; k++) if (ch_[k].voice == n.voice) c = k;
     if (n.kind == 0) {
         if (c) { send(uint8_t(0x80 | c), uint8_t(ch_[c].note), 64); ch_[c] = Chan(); }   // the same voice again
-        for (int k = 1; k < 16 && !c; k++) if (ch_[k].voice < 0) c = k;
+        for (int k = chFirst_; k < chEnd_ && !c; k++) if (ch_[k].voice < 0) c = k;
         if (!c) return;                                                                  // 15 notes already sound
         Chan& h = ch_[c];
         h = Chan();
@@ -223,7 +223,7 @@ void ControllerHost::play(const Note& n) {
         h.volume = pv == startVolume_.end() ? 127 : std::clamp(int(std::lround(pv->second * 127)), 0, 127);
         if (pv != startVolume_.end()) startVolume_.erase(pv);
         send(uint8_t(0xB0 | c), 7, uint8_t(h.volume));
-        send(uint8_t(0xB0 | c), 9, uint8_t(std::clamp(n.part, 0, 3) + 1));   // the part (sound) it plays
+        send(uint8_t(0xB0 | c), 9, uint8_t(std::clamp(n.part + partBase_, 0, 3) + 1));   // the part (sound) it plays
         int vel = std::clamp(int(std::lround(n.velocity * 127 / velocityScale_)), 1, 127);
         send(uint8_t(0x90 | c), uint8_t(h.note), uint8_t(vel));
         // After the note-on: the engine starts a finger's bend and pressure at zero.

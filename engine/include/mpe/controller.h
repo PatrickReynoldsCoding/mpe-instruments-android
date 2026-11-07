@@ -3,6 +3,7 @@
 // One thread (the UI's) calls everything.
 #pragma once
 #include <cstdint>
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <string>
@@ -42,6 +43,12 @@ public:
     struct SettingChange { int index; double value; };
     std::vector<SettingChange> takeSettingChanges() { std::vector<SettingChange> v; v.swap(changes_); return v; }
 
+    // In a split, where this controller's notes go: the part (sound) its part 0 plays (its parts
+    // follow on), and the MIDI channels it may use, first..first+count-1 (of 1..15), so two
+    // controllers never share a channel.
+    void setPart(int first) { partBase_ = first; }
+    void setChannels(int first, int count) { stop(); chFirst_ = std::clamp(first, 1, 15); chEnd_ = std::clamp(first + count, chFirst_ + 1, 16); }
+
     // The engine reads note-on velocity times this (the Seaboard sends small ones): divide by it.
     void setVelocityScale(float s) { velocityScale_ = s; }
     double nowMs() const;
@@ -68,6 +75,7 @@ private:
     std::vector<uint8_t> draw_;
     bool dirty_ = false;
     float velocityScale_ = 5;
+    int partBase_ = 0, chFirst_ = 1, chEnd_ = 16;
     std::string error_;
     int64_t startNs_ = 0;
     // Its voices on MIDI channels 1..15 (2..16 to a musician), the master channel 0 kept free.
