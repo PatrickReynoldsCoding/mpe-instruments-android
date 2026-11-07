@@ -25,7 +25,7 @@
 /* ---- settings (the manifest's, in order) ---------------------------------------------------- */
 enum {
     S_COLS, S_SIZE, S_SPACING, S_FLIP_X, S_FLIP_Y, S_CHROMATIC, S_SCALE, S_KEY, S_OCTAVE,
-    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_ZONE_EDIT, S_ZONE_BLEND, S_ZONE_RANGE, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS,
+    S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_ZONE_EDIT, S_ZONE_BLEND, S_ZONE_RANGE, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_ECHO,
     S_LATCH, S_LATCHMODE, S_BAR, S_SIDE0, S_TURN = S_SIDE0 + 5,
     /* hidden: kept by the MESH, set from the zone editor and the Dynamics fader */
     S_ZONE_MAP, S_ZONE_P1, S_DYN = S_ZONE_P1 + 4, S_COUNT
@@ -33,7 +33,7 @@ enum {
 /* Strike zones: a square as 3 x 3 zones (rows top to bottom as on screen), each a starting level
    0..5 (pp p mp mf f ff), kept as one number: zone c is digit c in base 6. */
 #define ZONES_EVEN 6046617.0     /* every zone mf */
-static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 3, 2, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 1, 0,
+static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 3, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 0,
                                ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, 1};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
@@ -43,6 +43,8 @@ enum { T_NONE, T_LOUDNESS, T_TONE, T_BEND, T_VOLUME };
 enum { LATCH_CHORD, LATCH_TAP };
 enum { C_LATCH, C_HOLD, C_BEND, C_TONE, C_DYN, C_COUNT };   /* the side controls */
 enum { COL_PLAIN, COL_DEGREES, COL_CHORD, COL_PILLARS, COL_NAMES };
+/* Same notes elsewhere: how the other squares of a held note's pitch, in any octave, are marked. */
+enum { ECHO_OFF, ECHO_RING, ECHO_GLOW };
 enum { SIDE_OFF, SIDE_LEFT, SIDE_RIGHT };
 
 /* SCALES[1..] of Perf.kt: bit d set when the degree d semitones above the key is in the scale. */
@@ -826,6 +828,10 @@ static void draw(void) {
     float radius = cell * 0.08f, side = cell - gap;
     unsigned light = flat ? BLACK : th->light;
     int r0 = (int)floorf_(pos) - 1, r1 = (int)floorf_(pos + shown) + 1;
+    /* The pitches sounding now (held or latched), for marking the same notes elsewhere. */
+    int sounding = 0, echo = (int)set_[S_ECHO];
+    for (int k = 0; k < MAX_FINGERS; k++) if (fingers[k].used) sounding |= 1 << floormod(fingers[k].note, 12);
+    for (int k = 0; k < nlatched; k++) sounding |= 1 << floormod(latched[k].note, 12);
     for (int r = r0; r <= r1; r++) for (int c = 0; c < cols; c++) {
         int n = r * cols + c;
         float ox = square_x(n), oy = square_y(n);
@@ -857,6 +863,20 @@ static void draw(void) {
         if (root && !flat && !on && !th->bright)
             g_rect(ox - 3, oy - 3, side + 6, side + 6, radius + 3, 0, mesh_alpha(colour ? colour : light, 0.18f), 6);
         g_rect(ox, oy, side, side, radius, 0, edge, off ? 1.0f : root ? 2.5f : 1.5f);
+        /* The same note elsewhere: not lit like a pressed square, only marked. */
+        int same = echo != ECHO_OFF && !on && !kept && glow < 0.5f && ((sounding >> floormod(note, 12)) & 1);
+        unsigned ec = flat ? BLACK : colour ? colour : th->hot;
+        if (same) switch (echo) {
+        case ECHO_RING: {
+            float in = side * 0.12f;
+            g_rect(ox + in, oy + in, side - 2 * in, side - 2 * in, radius * 0.7f, 0, mesh_alpha(ec, 0.95f), 3);
+            break;
+        }
+        case ECHO_GLOW:
+            if (!flat) g_rect(ox - 8, oy - 8, side + 16, side + 16, radius + 8, mesh_alpha(ec, 0.22f), 0, 0);
+            g_rect(ox, oy, side, side, radius, 0, mesh_alpha(ec, 0.9f), 2.5f);
+            break;
+        }
         /* A latched square: a dot in its corner, as long as it is held. */
         if (kept && !on)
             g_circle(ox + side * 0.84f, oy + side * 0.16f, side * 0.06f,

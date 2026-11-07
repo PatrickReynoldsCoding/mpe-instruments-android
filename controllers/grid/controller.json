@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "patrickreynolds/grid",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "name": "Grid",
   "description": "Square keys, upright: the notes climb row by row; drag to bend toward the next, wiggle for vibrato",
   "author": "Patrick Reynolds",
@@ -232,6 +232,17 @@
         "By note name"
       ],
       "default": 0
+    },
+    {
+      "id": "sameNotes",
+      "name": "Same notes elsewhere",
+      "type": "choice",
+      "options": [
+        "Off",
+        "Ring",
+        "Glow"
+      ],
+      "default": 1
     },
     {
       "id": "latch",
