@@ -28,7 +28,8 @@ FN(jstring, nativeInstrumentField)(JNIEnv* env, jobject, jint index, jint field)
     // ("winds/flute"), which a package keeps as its first alias.
     const char* v = field == 0 ? (i.aliases.empty() ? i.id : i.aliases[0]).c_str() : field == 1 ? i.group.c_str()
                   : field == 2 ? i.name.c_str() : field == 3 ? i.description.c_str()
-                  : i.meta("range");                 // field 4: "low high" in Hz, or ""
+                  : field == 4 ? i.meta("range")     // field 4: "low high" in Hz, or ""
+                  : i.meta("sound");                 // field 5: its own effects, `declare sound "reverb=0.3 ..."`, or ""
     return env->NewStringUTF(v ? v : "");
 }
 

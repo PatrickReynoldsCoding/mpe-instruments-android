@@ -143,6 +143,9 @@ every system that compiles it.
 2. ~~odo builds from the packages~~: done. The engine (`engine/CMakeLists.txt`) compiles every
    package in; a computer compiles them while running. Both pass the same checks, and the two
    ways sound the same (the flute differs by 2 parts in a million).
-3. Add the new `declare`s to the instruments themselves.
+3. ~~Add the new `declare`s to the instruments themselves~~: `sound` is done (every instrument says
+   what it is meant to be heard with; the pack manifests no longer carry effects, and odo reads
+   them from the instrument, falling back to a pack's only for an instrument that declares none).
+   `id`, `version` and `tags` are still taken from file names and folders.
 4. Presets store `id@version`; old ids are read through the aliases (the engine already finds
    instruments by alias).

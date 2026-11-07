@@ -9,9 +9,13 @@ Seaboard -> android.media.midi -> core (clean) -> parts (play / arp) -> Faust vo
 ```
 
 What it does:
-- **62 instruments in six packs** (Classical; Keys & Organs; Plucked & Struck; Winds, Brass & Voices; Synthesizers; Percussion), each finger its own voice (MPE): pitch glides,
-- **14 physical-model and synth instruments**, each finger its own voice (MPE): pitch glides,
-  pressure swells, slide shapes the tone.
+- **62 instruments in six packs** (Classical; Keys & Organs; Plucked & Struck; Winds, Brass & Voices;
+  Synthesizers; Percussion), each finger its own voice (MPE): pitch glides, pressure swells, slide
+  shapes the tone. **Each instrument owns how it is meant to be heard**: its reverb and delay
+  sends, tone, drive, touch curve and release come from the instrument (`declare sound`), and its
+  character effects (rotating speaker, ensemble chorus, cabinet, small room) run inside it.
+  odo keeps what belongs to the player: the hall and the tempo delay, the arpeggiator, split and
+  layer, pitch assist, the controllers and the phone's tilt and breath.
 - **Split and layer**: two instruments, left and right of a split point (or "learn" it from a
   key), or both at once with their own octave and level.
 - **An MPE arpeggiator** per part: up, down, up-down, as played, random, chord; rate, gate,

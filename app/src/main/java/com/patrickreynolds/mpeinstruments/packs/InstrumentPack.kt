@@ -28,7 +28,7 @@ data class InstrumentPack(
     fun defaultsFor(id: String) = overrides[id] ?: defaults
 }
 
-/** A pack's effects for an instrument: its part's sends, tone and touch, and the room it plays in. */
+/** An instrument's effects, as it says it is meant to be heard (a pack can give the ones it leaves out): its part's sends, tone and touch, and the room it plays in. */
 data class SoundDefaults(
     val reverb: Float = 0.15f,
     val reverbSize: Float = 0.5f,
@@ -47,6 +47,14 @@ data class SoundDefaults(
         fun from(o: JSONObject?, d: SoundDefaults = SoundDefaults()) = if (o == null) d else SoundDefaults(
             f(o, "reverb", d.reverb), f(o, "reverbSize", d.reverbSize), f(o, "reverbDamp", d.reverbDamp), f(o, "delay", d.delay),
             f(o, "brightness", d.brightness), f(o, "drive", d.drive), f(o, "pressureCurve", d.pressureCurve), f(o, "release", d.release))
+        /** An instrument's own `declare sound "reverb=0.3 delay=0 ..."`; what it leaves out comes from [d]. */
+        fun declared(text: String, d: SoundDefaults = SoundDefaults()): SoundDefaults {
+            val m = text.trim().split(Regex("\\s+")).mapNotNull { it.split("=").takeIf { p -> p.size == 2 } }
+                .mapNotNull { p -> p[1].toFloatOrNull()?.let { p[0] to it } }.toMap()
+            return SoundDefaults(m["reverb"] ?: d.reverb, m["reverbSize"] ?: d.reverbSize, m["reverbDamp"] ?: d.reverbDamp,
+                m["delay"] ?: d.delay, m["brightness"] ?: d.brightness, m["drive"] ?: d.drive,
+                m["pressureCurve"] ?: d.pressureCurve, m["release"] ?: d.release)
+        }
         private fun f(o: JSONObject, k: String, d: Float) = o.optDouble(k, d.toDouble()).toFloat()
     }
 }
@@ -55,6 +63,9 @@ data class SoundDefaults(
 object Packs {
     var all: List<InstrumentPack> = emptyList()
         private set
+
+    /** The effects each instrument says it is meant to be heard with (its `declare sound`). */
+    private var own: Map<String, String> = emptyMap()
 
     /**
      * Read the manifests and match them to the engine's instruments. A pack holds the instruments
@@ -67,6 +78,7 @@ object Packs {
             .filter { it.endsWith(".json") }
             .mapNotNull { f -> runCatching { JSONObject(context.assets.open("packs/$f").bufferedReader().use { it.readText() }) }.getOrNull() }
             .sortedWith(compareBy({ it.optInt("order", 1000) }, { it.optString("name") }))
+        own = instruments.filter { it.sound.isNotBlank() }.associate { it.id to it.sound }
         val listed = mutableSetOf<String>()
         val packs = manifests.map { parse(it, instruments, listed) }.filter { it.instruments.isNotEmpty() }.toMutableList()
         val rest = instruments.filter { it.id !in listed }
@@ -77,7 +89,11 @@ object Packs {
 
     fun packOf(id: String) = all.firstOrNull { p -> p.instruments.any { it.id == id } }
     fun groupOf(id: String) = all.firstNotNullOfOrNull { p -> p.groups.firstOrNull { g -> g.instruments.any { it.id == id } } }
-    fun defaultsFor(id: String) = packOf(id)?.defaultsFor(id) ?: SoundDefaults()
+    /** The instrument's own effects; what it leaves out, and instruments that declare none, get the pack's. */
+    fun defaultsFor(id: String): SoundDefaults {
+        val pack = packOf(id)?.defaultsFor(id) ?: SoundDefaults()
+        return own[id]?.let { SoundDefaults.declared(it, pack) } ?: pack
+    }
 
     /** One manifest: its groups, with the instruments the engine has that no earlier pack took ([listed] is updated). */
     private fun parse(o: JSONObject, instruments: List<Native.Instrument>, listed: MutableSet<String>): InstrumentPack {

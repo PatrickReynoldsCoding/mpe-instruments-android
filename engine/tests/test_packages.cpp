@@ -38,6 +38,12 @@ static void instrumentPackage() {
     CHECK(pkg->isInstrument() && pkg->id() == "patrickreynolds/flute", "it is the flute (%s)", pkg->id().c_str());
     CHECK(pkg->manifest["aliases"][size_t(0)].str() == "winds/flute", "its old id is an alias");
     CHECK(pkg->has("lib/stdfaust.lib") && pkg->has("lib/mpe.lib"), "it carries its libraries");
+    CHECK(pkg->manifest["sound"]["reverb"].num(-1) > 0.2, "the flute's own effects are in its manifest");
+    for (int i = 0; i < instrumentCount(); i++) if (instrumentAt(i).id == "patrickreynolds/flute") {
+        std::string snd = instrumentAt(i).meta("sound");
+        CHECK(snd.find("reverb=") != std::string::npos && snd.find("pressureCurve=") != std::string::npos,
+              "the engine hands the app the flute's own effects (\"%s\")", snd.c_str());
+    }
 #ifdef MPE_LIBFAUST
     int builtin = -1;
     for (int i = 0; i < instrumentCount(); i++) if (instrumentAt(i).id == "patrickreynolds/flute") { builtin = i; break; }
