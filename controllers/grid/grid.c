@@ -28,13 +28,16 @@ enum {
     S_ACROSS, S_UPDOWN, S_BEND_RANGE, S_BEND_SNAP, S_ZONE_EDIT, S_ZONE_BLEND, S_ZONE_RANGE, S_VIBRATO, S_LABELS, S_THEME, S_COLOURS, S_ECHO,
     S_LATCH, S_LATCHMODE, S_BAR, S_SIDE0, S_TURN = S_SIDE0 + 5,
     /* hidden: kept by the MESH, set from the zone editor and the Dynamics fader */
-    S_ZONE_MAP, S_ZONE_P1, S_DYN = S_ZONE_P1 + 4, S_COUNT
+    S_ZONE_MAP, S_ZONE_P1, S_DYN = S_ZONE_P1 + 4,
+    /* the axes' shaping, set in the touch panel: amount and sensitivity in %, flip */
+    S_AX_AMOUNT, S_AX_SENS, S_AX_FLIP, S_UD_AMOUNT, S_UD_SENS, S_UD_FLIP, S_COUNT
 };
 /* Strike zones: a square as 3 x 3 zones (rows top to bottom as on screen), each a starting level
    0..5 (pp p mp mf f ff), kept as one number: zone c is digit c in base 6. */
 #define ZONES_EVEN 6046617.0     /* every zone mf */
-static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 3, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 0,
-                               ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, 1};
+static double set_[S_COUNT] = {3, 100, 9, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1, 24, 2, 0, 0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 0,
+                               ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, ZONES_EVEN, 1,
+                               100, 100, 0, 100, 100, 0};
 /* Bend range: 0 toward the next note; else semitones at a whole square's slide (as the gyro's). */
 static const float BEND_RANGES[7] = {0, 1, 2, 3, 5, 7, 12};
 enum { TURN_AUTO, TURN_UPRIGHT, TURN_SIDEWAYS };
@@ -259,15 +262,11 @@ static int nfingers(void) { int c = 0; for (int k = 0; k < MAX_FINGERS; k++) c +
 /* ---- strike zones ---------------------------------------------------------------------------- */
 static const float LEVEL[6] = {0.25f, 0.4f, 0.55f, 0.7f, 0.85f, 1.0f};
 static const char* LEVEL_NAME[6] = {"pp", "p", "mp", "mf", "f", "ff"};
-/* Strike range: how much quieter pp is than ff, in dB. */
-static const float RANGE_DB[7] = {6, 12, 18, 24, 30, 36, 48};
-static const char* RANGE_NAME[7] = {"6", "12", "18", "24", "30", "36", "48"};
 
 /* The note's own volume for a strike level: ff full, pp the strike range below, the levels
    between evenly spaced in dB (so mp sounds half way, not just counts half way). */
 static float strike_gain(float level) {
-    int r = (int)set_[S_ZONE_RANGE];
-    float range = RANGE_DB[r < 0 || r > 6 ? 3 : r];
+    float range = clampf((float)set_[S_ZONE_RANGE], 0, 60);     /* dB: how much quieter pp is than ff */
     float t = clampf((level - LEVEL[0]) / (LEVEL[5] - LEVEL[0]), 0, 1);
     return expf_(-range * (1 - t) * 0.1151293f);     /* 10^(dB/20): ln 10 / 20 */
 }
@@ -310,7 +309,13 @@ typedef struct { float pitch, pressure, slide, volume; } Expr;
    a whole one was too far to hear much); bend aims at the neighbouring note, a whole square away. */
 #define REACH 0.5f
 static void apply(Expr* e, int target, float d, int across, const Finger* f, float* semis) {
-    float v = clampf(d, -1, 1), w = clampf(d / REACH, -1, 1);
+    /* The axis's own shaping: flipped, more or less sensitive (how short a slide is the full
+       change), and how much of the change it makes. */
+    int a = across ? S_AX_AMOUNT : S_UD_AMOUNT;
+    float amount = clampf((float)set_[a] / 100.0f, 0, 1), sens = clampf((float)set_[a + 1] / 100.0f, 0.1f, 8);
+    if (set_[a + 2] != 0) d = -d;
+    d *= sens;
+    float v = clampf(d, -1, 1) * amount, w = clampf(d / REACH, -1, 1) * amount;
     switch (target) {
     case T_LOUDNESS: {
         /* From where it was struck: up to full, down to nearly nothing. The volume follows it too, so
@@ -645,24 +650,40 @@ static void draw_sides(const Theme* th) {
 }
 
 
-/* ---- the strike zone editor: a panel over the grid -------------------------------------------- */
-/* Opened by the rail's "Edit strike zones"; drawn and touched in surface coordinates (never turned).
-   Pick a level, then tap or drag over the zones to paint it; or load a preset; Save, then a slot,
-   keeps the zones in one of your own four. */
-enum { K_DONE, K_CELL, K_LEVEL, K_SMOOTH, K_PRESET, K_SLOT, K_SAVE, K_RANGE };
+/* ---- the touch panel: strike zones and the two axes, over the grid ---------------------------- */
+/* Opened by the rail's "Edit touch & strike zones"; drawn and touched in surface coordinates
+   (never turned). Strike zones: pick a level, then tap or drag over the zones to paint it; or load
+   a preset; Save, then a slot, keeps the zones in one of your own four. Across and Up/down: what
+   each moves, how much, how sensitive, and which way. Bend: its range and snap. Two columns on a
+   wide surface; one, scrolled by dragging its background, on a narrow one. */
+enum { K_DONE, K_CELL, K_LEVEL, K_SMOOTH, K_PRESET, K_SLOT, K_SAVE, K_TARGET, K_FLIP, K_SLIDER };
 typedef struct { float x, y, w, h; int kind, arg; } Hit;
-static Hit hits[40];
-static int nhits, brush = 5, saving, ed_finger = -1;
+#define MAX_HITS 64
+static Hit hits[MAX_HITS];
+static int nhits, brush = 5, saving, ed_finger = -1, ed_slider = -1, ed_dragging;
+static float ed_scroll, ed_from, ed_scroll0, ed_room, ed_content;
 
 static const char* PRESET_NAME[7] = {"Even", "Top loud", "Bottom loud", "Centre loud", "Edges loud", "Left soft", "Right soft"};
 static const signed char PRESETS[7][9] = {
     {3, 3, 3, 3, 3, 3, 3, 3, 3}, {5, 5, 5, 3, 3, 3, 1, 1, 1}, {1, 1, 1, 3, 3, 3, 5, 5, 5},
     {1, 2, 1, 2, 5, 2, 1, 2, 1}, {5, 4, 5, 4, 1, 4, 5, 4, 5}, {1, 3, 5, 1, 3, 5, 1, 3, 5}, {5, 3, 1, 5, 3, 1, 5, 3, 1}};
+static const char* TARGET_NAME[5] = {"None", "Loudness", "Tone", "Bend", "Volume"};
+static const char* BEND_NAME[7] = {"Next note", "1 semitone", "2 semitones", "3 semitones", "5 semitones", "7 semitones", "12 semitones"};
+
+/* The sliders: the setting each moves, its range and step, and how its value reads. */
+typedef struct { int index; float min, max, step; const char* label; int kind; } Slider;   /* kind 0 number, 1 %, 2 dB, 3 bend range */
+enum { SL_RANGE, SL_AX_AMOUNT, SL_AX_SENS, SL_UD_AMOUNT, SL_UD_SENS, SL_BEND_RANGE, SL_BEND_SNAP, SL_COUNT };
+static const Slider SLIDERS[SL_COUNT] = {
+    {S_ZONE_RANGE, 0, 60, 1, "Softest below loudest", 2},
+    {S_AX_AMOUNT, 0, 100, 5, "Amount", 1}, {S_AX_SENS, 25, 400, 5, "Sensitivity", 1},
+    {S_UD_AMOUNT, 0, 100, 5, "Amount", 1}, {S_UD_SENS, 25, 400, 5, "Sensitivity", 1},
+    {S_BEND_RANGE, 0, 6, 1, "Range", 3}, {S_BEND_SNAP, 0, 100, 5, "Snap to semitones", 1},
+};
 
 static int editing(void) { return set_[S_ZONE_EDIT] != 0; }
 
 static void hit(float x, float y, float w, float h, int kind, int arg) {
-    if (nhits < 40) { Hit t = {x, y, w, h, kind, arg}; hits[nhits++] = t; }
+    if (nhits < MAX_HITS) { Hit t = {x, y, w, h, kind, arg}; hits[nhits++] = t; }
 }
 
 static void keep(int index, double v) { set_[index] = v; mesh_set_setting(index, v); dirty = 1; }
@@ -678,66 +699,156 @@ static void chip(float x, float y, float w, float h, const char* label, int on, 
     hit(x, y, w, h, kind, arg);
 }
 
-static void ed_draw(const Theme* th) {
-    nhits = 0;
-    unsigned ink = eink ? BLACK : th->light, panel = eink ? WHITE : th->background;
-    float pw = SW - 24 < 520 ? SW - 24 : 520, ph = SH - 24, px = (SW - pw) / 2, py = 12;
-    mesh_rect(0, 0, SW, SH, 0, eink ? 0xFFFFFFCCu : 0x000000B0u, 0, 0);
-    mesh_rect(px, py, pw, ph, 16, panel, mesh_alpha(ink, 0.6f), 1.5f);
-    mesh_text(px + 18, py + 30, 16, ink, MESH_TEXT_BOLD, "Strike zones");
-    mesh_text(px + 18, py + 50, 10, mesh_alpha(ink, 0.7f), 0, "Where a square is struck sets how loud its note starts.");
-    chip(px + pw - 94, py + 10, 80, 32, "Done", 1, th, K_DONE, 0);
-    float in = 16, cw = pw - 2 * in;
-    /* The square, its nine zones. */
-    float E = cw < ph - 340 ? cw : ph - 340;
+static void slider(float x, float y, float w, int id, const Theme* th) {
+    const Slider* sl = &SLIDERS[id];
+    unsigned ink = eink ? BLACK : th->light;
+    float v = (float)set_[sl->index], t = clampf((v - sl->min) / (sl->max - sl->min), 0, 1);
+    char val[24];
+    if (sl->kind == 3) put(val, BEND_NAME[(int)v < 0 || (int)v > 6 ? 0 : (int)v]);
+    else { char* p = put_int(val, roundi(v), 0); put(p, sl->kind == 1 ? "%" : sl->kind == 2 ? " dB" : ""); }
+    mesh_text(x, y + 13, 10, mesh_alpha(ink, 0.8f), 0, sl->label);
+    mesh_text(x + w, y + 13, 10, ink, MESH_TEXT_RIGHT | MESH_TEXT_BOLD, val);
+    float ty = y + 28;
+    mesh_rect(x, ty - 3, w, 6, 3, mesh_alpha(ink, 0.25f), 0, 0);
+    mesh_rect(x, ty - 3, w * t, 6, 3, eink ? BLACK : mesh_alpha(ink, 0.8f), 0, 0);
+    mesh_circle(x + w * t, ty, 9, eink ? BLACK : th->hot, eink ? WHITE : th->background, 2);
+    hit(x - 6, y, w + 12, 40, K_SLIDER, id);
+}
+
+static void slider_to(int id, float x) {
+    for (int k = 0; k < nhits; k++) if (hits[k].kind == K_SLIDER && hits[k].arg == id) {
+        const Slider* sl = &SLIDERS[id];
+        float t = clampf((x - (hits[k].x + 6)) / (hits[k].w - 12), 0, 1);
+        float v = sl->min + t * (sl->max - sl->min);
+        v = sl->min + (float)roundi((v - sl->min) / sl->step) * sl->step;
+        if ((double)v != set_[sl->index]) keep(sl->index, v);
+        return;
+    }
+}
+
+static float section(float x, float y, const char* title, const Theme* th) {
+    mesh_text(x, y + 16, 13, eink ? BLACK : th->light, MESH_TEXT_BOLD, title);
+    return y + 26;
+}
+
+/* The strike zones: the square, the levels, smooth, range, presets, your four. */
+static float zones_part(float x, float y, float cw, float maxE, const Theme* th) {
+    unsigned ink = eink ? BLACK : th->light;
+    y = section(x, y, "Strike zones", th);
+    float E = cw < maxE ? cw : maxE;
     if (E < 90) E = 90;
-    float ex = px + (pw - E) / 2, ey = py + 66, zs = E / 3;
+    float ex = x + (cw - E) / 2, zs = E / 3;
     int z[9];
     zones_of(set_[S_ZONE_MAP], z);
     for (int c = 0; c < 9; c++) {
-        float x = ex + (float)(c % 3) * zs, y = ey + (float)(c / 3) * zs;
+        float zx = ex + (float)(c % 3) * zs, zy = y + (float)(c / 3) * zs;
         float a = LEVEL[z[c]];
-        mesh_rect(x + 2, y + 2, zs - 4, zs - 4, 8, eink ? mesh_alpha(BLACK, a * 0.6f) : mesh_alpha(th->light, 0.12f + 0.75f * a), mesh_alpha(ink, 0.5f), 1);
-        mesh_text(x + zs / 2, y + zs / 2 + 7, zs > 80 ? 20 : 13, a > 0.6f && !eink ? th->on_light : ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, LEVEL_NAME[z[c]]);
-        hit(x, y, zs, zs, K_CELL, c);
+        mesh_rect(zx + 2, zy + 2, zs - 4, zs - 4, 8, eink ? mesh_alpha(BLACK, a * 0.6f) : mesh_alpha(th->light, 0.12f + 0.75f * a), mesh_alpha(ink, 0.5f), 1);
+        mesh_text(zx + zs / 2, zy + zs / 2 + 7, zs > 80 ? 20 : 13, a > 0.6f && !eink ? th->on_light : ink, MESH_TEXT_CENTER | MESH_TEXT_BOLD, LEVEL_NAME[z[c]]);
+        hit(zx, zy, zs, zs, K_CELL, c);
     }
-    mesh_rect(ex, ey, E, E, 10, 0, ink, 2);
-    float y = ey + E + 14, gap = 6;
-    /* The level to paint with. */
-    float lw = (cw - 5 * gap) / 6;
-    for (int l = 0; l < 6; l++) chip(px + in + (float)l * (lw + gap), y, lw, 34, LEVEL_NAME[l], l == brush, th, K_LEVEL, l);
+    mesh_rect(ex, y, E, E, 10, 0, ink, 2);
+    y += E + 12;
+    float gap = 6, lw = (cw - 5 * gap) / 6;
+    for (int l = 0; l < 6; l++) chip(x + (float)l * (lw + gap), y, lw, 32, LEVEL_NAME[l], l == brush, th, K_LEVEL, l);
+    y += 40;
+    chip(x, y, cw, 30, set_[S_ZONE_BLEND] != 0 ? "Smooth between zones: on" : "Smooth between zones: off", set_[S_ZONE_BLEND] != 0, th, K_SMOOTH, 0);
+    y += 38;
+    slider(x, y, cw, SL_RANGE, th);
     y += 44;
-    chip(px + in, y, cw, 30, set_[S_ZONE_BLEND] != 0 ? "Smooth between zones: on" : "Smooth between zones: off", set_[S_ZONE_BLEND] != 0, th, K_SMOOTH, 0);
-    y += 40;
-    /* The range: how much quieter pp is than ff. (ff is the sound at full: louder still is the
-       sound's own Level.) */
-    mesh_text(px + in, y + 13, 9, ink, MESH_TEXT_BOLD, "Range");
-    mesh_text(px + in, y + 26, 9, mesh_alpha(ink, 0.7f), 0, "dB");
-    float rw = (cw - 64 - 6 * gap) / 7;
-    for (int k = 0; k < 7; k++)
-        chip(px + in + 64 + (float)k * (rw + gap), y, rw, 30, RANGE_NAME[k], (int)set_[S_ZONE_RANGE] == k, th, K_RANGE, k);
-    y += 40;
-    /* Presets: the built-in ones, then your own four. */
     float pw4 = (cw - 3 * gap) / 4;
-    for (int k = 0; k < 7; k++) {
-        int row = k / 4, col = k % 4;
-        chip(px + in + (float)col * (pw4 + gap), y + (float)row * 36, pw4, 30, PRESET_NAME[k], 0, th, K_PRESET, k);
-    }
+    for (int k = 0; k < 7; k++) chip(x + (float)(k % 4) * (pw4 + gap), y + (float)(k / 4) * 36, pw4, 30, PRESET_NAME[k], 0, th, K_PRESET, k);
     y += 76;
-    mesh_text(px + in, y + 20, 11, ink, MESH_TEXT_BOLD, saving ? "Save to:" : "Yours:");
+    mesh_text(x, y + 20, 11, ink, MESH_TEXT_BOLD, saving ? "Save to:" : "Yours:");
     float sw = (cw - 64 - 4 * gap) / 5;
     for (int k = 0; k < 4; k++) {
         char name[4] = {(char)('1' + k), 0};
-        chip(px + in + 64 + (float)k * (sw + gap), y, sw, 30, name, 0, th, K_SLOT, k);
+        chip(x + 64 + (float)k * (sw + gap), y, sw, 30, name, 0, th, K_SLOT, k);
     }
-    chip(px + in + 64 + 4 * (sw + gap), y, sw, 30, "Save", saving, th, K_SAVE, 0);
+    chip(x + 64 + 4 * (sw + gap), y, sw, 30, "Save", saving, th, K_SAVE, 0);
+    return y + 40;
 }
 
-/* A touch on the editor: tap the buttons; tap or drag over the zones to paint them. */
+/* One axis: what it moves, its amount and sensitivity, and its direction. */
+static float axis_part(float x, float y, float cw, int across, const Theme* th) {
+    y = section(x, y, across ? "Across" : "Up/down", th);
+    int target = (int)set_[across ? S_ACROSS : S_UPDOWN];
+    float gap = 6, tw = (cw - 4 * gap) / 5;
+    for (int t = 0; t < 5; t++) chip(x + (float)t * (tw + gap), y, tw, 32, TARGET_NAME[t], t == target, th, K_TARGET, across * 8 + t);
+    y += 40;
+    slider(x, y, cw, across ? SL_AX_AMOUNT : SL_UD_AMOUNT, th);
+    y += 44;
+    slider(x, y, cw, across ? SL_AX_SENS : SL_UD_SENS, th);
+    y += 44;
+    int flipped = set_[across ? S_AX_FLIP : S_UD_FLIP] != 0;
+    chip(x, y, cw, 30, flipped ? (across ? "Direction: flipped (left is more)" : "Direction: flipped (down is more)")
+                               : (across ? "Direction: right is more" : "Direction: up is more"), flipped, th, K_FLIP, across);
+    return y + 40;
+}
+
+static float bend_part(float x, float y, float cw, const Theme* th) {
+    y = section(x, y, "Bend", th);
+    slider(x, y, cw, SL_BEND_RANGE, th);
+    y += 44;
+    slider(x, y, cw, SL_BEND_SNAP, th);
+    return y + 48;
+}
+
+static void ed_draw(const Theme* th) {
+    nhits = 0;
+    unsigned ink = eink ? BLACK : th->light, panel = eink ? WHITE : th->background;
+    int two = SW >= 820 && SH >= 520;
+    float pw = SW - 24 < (two ? 980 : 520) ? SW - 24 : (two ? 980 : 520), ph = SH - 24, px = (SW - pw) / 2, py = 12;
+    float top = py + 62, bottom = py + ph - 8;
+    ed_room = bottom - top;
+    mesh_rect(0, 0, SW, SH, 0, eink ? 0xFFFFFFCCu : 0x000000B0u, 0, 0);
+    mesh_rect(px, py, pw, ph, 16, panel, mesh_alpha(ink, 0.6f), 1.5f);
+    /* The content, scrolled; then the header and the foot drawn over what scrolled under them. */
+    float in = 16, y0 = top - ed_scroll, end;
+    if (two) {
+        float cw = (pw - 3 * in) / 2;
+        float y1 = zones_part(px + in, y0, cw, ed_room - 290, th);
+        float y2 = axis_part(px + 2 * in + cw, y0, cw, 1, th);
+        y2 = axis_part(px + 2 * in + cw, y2 + 6, cw, 0, th);
+        y2 = bend_part(px + 2 * in + cw, y2 + 6, cw, th);
+        end = y1 > y2 ? y1 : y2;
+    } else {
+        float cw = pw - 2 * in;
+        float y1 = zones_part(px + in, y0, cw, cw, th);
+        y1 = axis_part(px + in, y1 + 6, cw, 1, th);
+        y1 = axis_part(px + in, y1 + 6, cw, 0, th);
+        end = bend_part(px + in, y1 + 6, cw, th);
+    }
+    ed_content = end - y0;
+    mesh_rect(px + 1, py + 1, pw - 2, top - py - 1, 15, panel, 0, 0);
+    mesh_rect(px + 1, bottom, pw - 2, py + ph - bottom - 1, 15, panel, 0, 0);
+    mesh_rect(px, 0, pw, py, 0, eink ? WHITE : 0x000000FFu, 0, 0);
+    mesh_rect(px, py + ph, pw, SH - py - ph, 0, eink ? WHITE : 0x000000FFu, 0, 0);
+    mesh_rect(px, py, pw, ph, 16, 0, mesh_alpha(ink, 0.6f), 1.5f);
+    mesh_text(px + 18, py + 30, 16, ink, MESH_TEXT_BOLD, "Touch");
+    if (ed_content > ed_room) mesh_text(px + 18, py + 50, 10, mesh_alpha(ink, 0.7f), 0, "Drag to scroll");
+    /* Hits under the header or foot can't be touched; Done always can. */
+    int k = 0;
+    for (int j = 0; j < nhits; j++) if (hits[j].y + hits[j].h > top && hits[j].y < bottom) hits[k++] = hits[j];
+    nhits = k;
+    chip(px + pw - 94, py + 10, 80, 32, "Done", 1, th, K_DONE, 0);
+}
+
+/* A touch on the panel: tap the buttons; drag a slider; tap or drag over the zones to paint them;
+   drag anywhere else to scroll. */
 static void ed_touch(int id, int phase, float x, float y) {
     if (phase != MESH_DOWN && id != ed_finger) return;
-    if (phase == MESH_UP || phase == MESH_CANCEL) { ed_finger = -1; return; }
-    if (phase == MESH_DOWN) ed_finger = id;
+    if (phase == MESH_UP || phase == MESH_CANCEL) { ed_finger = -1; ed_slider = -1; ed_dragging = 0; return; }
+    if (phase == MESH_MOVE) {
+        if (ed_slider >= 0) { slider_to(ed_slider, x); return; }
+        if (ed_dragging) {
+            float most = ed_content - ed_room;
+            ed_scroll = clampf(ed_scroll0 + (ed_from - y), 0, most > 0 ? most : 0);
+            dirty = 1;
+            return;
+        }
+    }
+    if (phase == MESH_DOWN) { ed_finger = id; ed_slider = -1; ed_dragging = 0; }
     for (int k = 0; k < nhits; k++) {
         Hit* h = &hits[k];
         if (x < h->x || x > h->x + h->w || y < h->y || y > h->y + h->h) continue;
@@ -760,11 +871,14 @@ static void ed_touch(int id, int phase, float x, float y) {
             else keep(S_ZONE_MAP, set_[S_ZONE_P1 + h->arg]);
             break;
         case K_SAVE: saving = !saving; break;
-        case K_RANGE: keep(S_ZONE_RANGE, h->arg); break;
+        case K_TARGET: keep(h->arg >= 8 ? S_ACROSS : S_UPDOWN, h->arg % 8); break;
+        case K_FLIP: keep(h->arg ? S_AX_FLIP : S_UD_FLIP, set_[h->arg ? S_AX_FLIP : S_UD_FLIP] != 0 ? 0 : 1); break;
+        case K_SLIDER: ed_slider = h->arg; slider_to(h->arg, x); break;
         }
         dirty = 1;
         return;
     }
+    if (phase == MESH_DOWN) { ed_dragging = 1; ed_from = y; ed_scroll0 = ed_scroll; }
 }
 
 /* The colour a note is marked with, or 0 to use the theme's. */
